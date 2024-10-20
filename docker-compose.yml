@@ -1,0 +1,47 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: landloard_mysqlDB
+    environment:
+      MYSQL_ROOT_PASSWORD: VERY_SECURE_PASSWORD
+      MYSQL_DATABASE: landloard_db
+      MYSQL_USER: user
+      MYSQL_PASSWORD: VERY_SECURE_PASSWORD
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "user", "--password=VERY_SECURE_PASSWORD"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - app_network
+
+  landloard_microservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: landloard_microservice
+    environment:
+      DB_USER: user
+      DB_PASSWORD: VERY_SECURE_PASSWORD
+      DB_HOST: mysql
+      DB_NAME: landloard_db
+      DB_PORT: 3306
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - app_network
+
+volumes:
+  db_data:
+
+networks:
+  app_network:
+    driver: bridge
