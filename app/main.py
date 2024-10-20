@@ -14,3 +14,4 @@ app.include_router(landlords_routes.router)
 @app.get("/")
 def home():
     return {"message": "Expenses service for HomeHarmony"}
+
