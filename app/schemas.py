@@ -4,14 +4,14 @@ from pydantic import BaseModel
 class HouseCreate(BaseModel):
     name: str
     tenants_count: int
-    # landlord_id: int  # Comentar temporariamente
+    landlord_id: str  
 
 # Esquema para resposta ao criar uma casa
 class HouseResponse(BaseModel):
     id: int
     name: str
     tenants_count: int
-    # landlord_id: int  # Comentar temporariamente
+    landlord_id: str
 
     class Config:
         orm_mode = True

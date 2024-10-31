@@ -7,9 +7,6 @@ class House(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), index=True)
-    tenants_count = Column(Integer)  # Número de inquilinos
-    # landloard_id = Column(str(255)) 
+    tenants_count = Column(Integer)  
+    landlord_id = Column(String(255), index=True) 
 
-    # Comentar landlord_id temporariamente
-    # landlord_id = Column(Integer, ForeignKey('users.id'))
-    # landlord = relationship("User")  # Relação com a tabela 'users'
