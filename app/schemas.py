@@ -1,17 +1,34 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # Esquema para criar uma casa
 class HouseCreate(BaseModel):
     name: str
-    tenants_count: int
-    # landlord_id: int  # Comentar temporariamente
+    landlord_id: str
+    address: str
+    city: str
+    state: str
+    zipcode: str
 
 # Esquema para resposta ao criar uma casa
 class HouseResponse(BaseModel):
     id: int
     name: str
-    tenants_count: int
-    # landlord_id: int  # Comentar temporariamente
+    landlord_id: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+# # Esquema para criar um inquilino
+# class TenentCreate(BaseModel):
+#     house_id: int
+#     rent: int
+#     tenent_id: str
+
+# # Esquema para resposta ao criar um inquilino
+# class TenentResponse(BaseModel):
+#     id: int
+#     house_id: int
+#     rent: int
+#     tenent_id: str
+
+#     model_config = ConfigDict(from_attributes=True)
