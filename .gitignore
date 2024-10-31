@@ -10,5 +10,3 @@ __pycache__/
 *.log
 *.sqlite3
 
-# Ignorar o ambiente virtual
-env/
