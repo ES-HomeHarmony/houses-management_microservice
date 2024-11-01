@@ -8,3 +8,6 @@ python-jose
 requests
 pytest
 pytest-cov
+pydantic
+coverage
+pytest-asyncio
