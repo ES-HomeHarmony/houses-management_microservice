@@ -12,3 +12,6 @@ __pycache__/
 
 # Ignorar o ambiente virtual
 .env/
+
+# Ignorar arquivos de mídia
+htmlcov/
