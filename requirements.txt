@@ -8,3 +8,4 @@ python-jose
 requests
 pytest
 pytest-cov
+boto3

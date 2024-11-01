@@ -33,7 +33,7 @@ services:
   #     DB_USER: user
   #     DB_PASSWORD: VERY_SECURE_PASSWORD
   #     DB_HOST: mysql
-  #     DB_NAME: landloard_db
+  #     DB_NAME: landlord_db
   #     DB_PORT: 3306
   #     # AWS_REGION: eu-north-1
   #     # COGNITO_USER_POOL_ID: eu-north-1_BZVwENxbX
