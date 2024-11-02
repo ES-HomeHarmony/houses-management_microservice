@@ -15,3 +15,10 @@ __pycache__/
 
 # Ignorar arquivos de mídia
 htmlcov/
+
+# Ignorar arquivos de testes
+coverage.xml
+.coverage
+
+# Ingorar arquivos de banco de dados
+test_tasks.db

@@ -1,5 +1,4 @@
 aiokafka
-kafka-python
 fastapi[standard]
 uvicorn
 sqlalchemy
@@ -13,3 +12,5 @@ pytest-cov
 pydantic
 coverage
 pytest-asyncio
+kafka-python
+six
