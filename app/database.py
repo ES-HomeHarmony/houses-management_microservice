@@ -1,7 +1,14 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
 import os
+
+env = os.getenv('ENV', 'development')
+env_file = f'.env/{env}.env'
+
+# Load environment variables from file
+if os.path.exists(env_file):
+    load_dotenv(env_file)
 
 # Retrieve credentials from environment variables
 db_user = os.getenv('DB_USER')

@@ -20,6 +20,7 @@ services:
     networks:
       - app_network
 
+
   landlord_microservice:
     build:
       context: .
@@ -48,6 +49,7 @@ services:
       #   condition: service_healthy
     networks:
       - app_network
+
 
 volumes:
   db_data_landlord:

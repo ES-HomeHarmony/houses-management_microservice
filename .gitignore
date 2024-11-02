@@ -11,4 +11,7 @@ __pycache__/
 *.sqlite3
 
 # Ignorar o ambiente virtual
-env/
+.env/
+
+# Ignorar arquivos de mídia
+htmlcov/
