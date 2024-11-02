@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Double
+from sqlalchemy import Column, Integer, String, ForeignKey, Double, Date
 from sqlalchemy.orm import relationship
+import datetime
 from app.database import Base
 
 class House(Base):
@@ -30,3 +31,18 @@ class House(Base):
 #     house = relationship("House", back_populates="tenents")  # Relação com a tabela 'houses'
 
 
+class Expense(Base):
+    __tablename__ = 'expense'
+
+    id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)  # Relação com a tabela 'houses'
+    amount = Column(Double, nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(String(255), nullable=True)
+    created_at = Column(Date, default=datetime.date.today)
+    deadline_date = Column(Date, nullable=True)
+    file_path = Column(String(255), nullable=True)
+
+    # Adicionar uma lista com os tenents_ids
+
+    house = relationship("House")  # Relação com a tabela 'houses'

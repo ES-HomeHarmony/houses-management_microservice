@@ -1,19 +1,41 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request
 from sqlalchemy.orm import Session
 from kafka import KafkaConsumer, KafkaProducer
 import json
 import threading
 import os
 from app.database import get_db
-from app.models import House
-from app.schemas import HouseCreate, HouseResponse
+from app.models import House, Expense
+from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse
 from typing import List
+from datetime import datetime
+import boto3
+from botocore.exceptions import NoCredentialsError
+import os
+from dotenv import load_dotenv
+import json
+from fastapi.responses import JSONResponse
 import time
 
 
 router = APIRouter(
     prefix="/houses",
     tags=["houses"],
+)
+
+
+env = os.getenv('ENV', 'development')
+env_file = f'.env/{env}.env'
+
+# Load environment variables from file
+if os.path.exists(env_file):
+    load_dotenv(env_file)
+
+s3_client = boto3.client(
+    "s3",
+    region_name=os.getenv("S3_REGION"),
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
 )
 
 producer = KafkaProducer(
@@ -73,6 +95,7 @@ def get_landlord_id_via_kafka(access_token: str):
 
     return cognito_id_landlord
 
+# Criar uma casa para um landlord
 @router.post("/create", response_model=HouseResponse)
 async def create_house(house: HouseCreate, db: Session = Depends(get_db), request: Request = None):
     
@@ -156,3 +179,53 @@ def get_houses_by_landlord(request: Request = None, db: Session = Depends(get_db
 #     if not houses:
 #         raise HTTPException(status_code=404, detail="Houses not found")
 #     return houses
+
+
+# Fazer post de uma nova despesa para uma casa
+@router.post("/addExpense", response_model=ExpenseResponse)
+def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: Session = Depends(get_db)):
+    
+    # Parse the JSON string into the ExpenseCreate model
+    try:
+        expense = ExpenseCreate(**json.loads(expense_data))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    
+    file_url = None
+
+    if file:
+        try:
+            s3_client.upload_fileobj(
+                file.file,
+                os.getenv("S3_BUCKET"),
+                f"expenses/{file.filename}"
+            )
+            file_url = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/expenses/{file.filename}"
+        except NoCredentialsError:
+            return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
+    
+    db_expense = Expense(
+        house_id=expense.house_id,
+        amount=expense.amount,
+        title=expense.title,
+        description=expense.description,
+        created_at=datetime.now(),
+        deadline_date=expense.deadline_date,
+        file_path=file_url
+    )
+
+    db.add(db_expense)
+    db.commit()
+    db.refresh(db_expense)
+    return db_expense
+
+
+# Obter todas as despesas de uma casa
+@router.get("/expenses/{house_id}", response_model=List[ExpenseResponse])
+def get_expenses_by_house(house_id: int, db: Session = Depends(get_db)):
+    expenses = db.query(Expense).filter(Expense.house_id == house_id).all()
+    if not expenses:
+        raise HTTPException(status_code=404, detail=f"Expenses not found for house {house_id}")
+    return expenses
