@@ -56,6 +56,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install six separately (for testing)
+        run: pip install six
+
       - name: Wait for MySQL to be Ready
         run: |
           echo "Waiting for MySQL to be ready..."
@@ -73,6 +76,7 @@ jobs:
             echo "Zookeeper not ready yet..."
             sleep 5
           done
+    
 
       - name: Run Tests
         env:
