@@ -34,7 +34,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: VERY_SECURE_PASSWORD
-          MYSQL_DATABASE: user_db
+          MYSQL_DATABASE: landlord_db
           MYSQL_USER: user
           MYSQL_PASSWORD: VERY_SECURE_PASSWORD
         ports:
@@ -83,8 +83,9 @@ jobs:
           DB_USER: user
           DB_PASSWORD: VERY_SECURE_PASSWORD
           DB_HOST: localhost
-          DB_NAME: user_db
+          DB_NAME: landlord_db
           DB_PORT: 3306
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
           ENV: development
         run: |
           pytest --cov=./ --cov-report=xml
