@@ -22,12 +22,8 @@ jobs:
         env:
           KAFKA_BROKER_ID: 1
           KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://0.0.0.0:9092
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
           KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-          KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-          KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
-          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
         ports:
           - 9092:9092
 
@@ -61,7 +57,7 @@ jobs:
         run: |
           echo "Waiting for MySQL to be ready..."
           for i in {1..30}; do
-            mysqladmin ping -h 127.0.0.1 -P 3306 -u user --password=VERY_SECURE_PASSWORD && break
+            mysqladmin ping -h mysql_test -P 3306 -u user --password=VERY_SECURE_PASSWORD && break
             echo "MySQL not ready yet..."
             sleep 5
           done
@@ -70,7 +66,7 @@ jobs:
         run: |
           echo "Waiting for Zookeeper to be ready..."
           for i in {1..30}; do
-            nc -zv localhost 2181 && break
+            nc -zv zookeeper 2181 && break
             echo "Zookeeper not ready yet..."
             sleep 5
           done
@@ -78,17 +74,16 @@ jobs:
       - name: Debug Kafka Connection
         run: |
           echo "Testing Kafka connection..."
-          nc -zv localhost 9092 || echo "Connection to Kafka failed"
+          nc -zv kafka 9092 || echo "Connection to Kafka failed"
 
       - name: Run Tests
         env:
           DB_USER: user
           DB_PASSWORD: VERY_SECURE_PASSWORD
-          DB_HOST: localhost
+          DB_HOST: mysql_test
           DB_NAME: landlord_db
           DB_PORT: 3306
-          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
-          ENV: development
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
         run: |
           pytest --cov=./ --cov-report=xml
 
