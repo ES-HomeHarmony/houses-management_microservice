@@ -13,4 +13,3 @@ pydantic
 coverage
 pytest-asyncio
 kafka-python
-six

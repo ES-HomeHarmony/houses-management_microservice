@@ -6,11 +6,25 @@ on:
       - dev
   pull_request:
     types: [opened, synchronize, reopened]
+
 jobs:
   sonarcloud:
     name: Test and SonarCloud Scan
     runs-on: ubuntu-latest
     services:
+      zookeeper:
+        image: wurstmeister/zookeeper:latest
+        ports:
+          - 2181:2181
+
+      kafka:
+        image: wurstmeister/kafka:latest
+        env:
+          KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+          KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
+        ports:
+          - 9092:9092
+
       mysql_test:
         image: mysql:8.0
         env:
@@ -19,32 +33,50 @@ jobs:
           MYSQL_USER: user
           MYSQL_PASSWORD: VERY_SECURE_PASSWORD
         ports:
-          - 3306:3306  # Expose different port for testing DB
+          - 3306:3306
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures complete history for better analysis
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'  # Use your project's Python version
+          python-version: '3.x'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
+
       - name: Wait for MySQL to be Ready
         run: |
-         echo "Waiting for MySQL to be ready..."
-         for i in {1..30}; do
+          echo "Waiting for MySQL to be ready..."
+          for i in {1..30}; do
             mysqladmin ping -h 127.0.0.1 -P 3306 -u user --password=VERY_SECURE_PASSWORD && break
             echo "MySQL not ready yet..."
             sleep 5
-         done
+          done
+
+      - name: Wait for Zookeeper to be Ready
+        run: |
+          echo "Waiting for Zookeeper to be ready..."
+          for i in {1..30}; do
+            nc -zv localhost 2181 && break
+            echo "Zookeeper not ready yet..."
+            sleep 5
+          done
+
+      - name: Wait for Kafka to be Ready
+        run: |
+          echo "Waiting for Kafka to be ready..."
+          for i in {1..30}; do
+            nc -zv localhost 9092 && break
+            echo "Kafka not ready yet..."
+            sleep 5
+          done
 
       - name: Run Tests
         env:
@@ -55,7 +87,7 @@ jobs:
           DB_PORT: 3306
           ENV: development
         run: |
-          pytest --cov=./ --cov-report=xml  # Runs tests and generates coverage report in XML
+          pytest --cov=./ --cov-report=xml
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
@@ -63,4 +95,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-            args: -Dsonar.projectBaseDir=./
+          args: -Dsonar.projectBaseDir=./
