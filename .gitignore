@@ -1,0 +1,17 @@
+# Ignorar arquivos compilados
+__pycache__/
+*.py[cod]
+
+# Ignorar configurações de IDEs
+.vscode/
+.idea/
+
+# Ignorar arquivos de pacotes e logs
+*.log
+*.sqlite3
+
+# Ignorar o ambiente virtual
+.env/
+
+# Ignorar arquivos de mídia
+htmlcov/
