@@ -266,7 +266,7 @@ def test_create_expense_with_file_upload(mock_s3_client, client):
     response_json = response.json()
     assert "id" in response_json
     assert response_json["title"] == "Rent"
-    assert response_json["amount"] == 1000.0
+    assert response_json["amount"] == 1000
     assert response_json["file_path"] is not None
 
 
@@ -358,7 +358,7 @@ def test_get_expenses_by_house(client):
         response_json = response.json()
         assert len(response_json) == 1
         assert response_json[0]["title"] == "Rent"
-        assert response_json[0]["amount"] == 1000.0
+        assert response_json[0]["amount"] == 1000
 
 
 # Test function for retriving all expenses from a house when there is no expenses
