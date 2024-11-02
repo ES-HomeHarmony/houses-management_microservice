@@ -14,21 +14,17 @@ class House(Base):
     state = Column(String(255))
     zipcode = Column(String(255))
 
-    # tenents = relationship("Tenents", back_populates="house")  # Relação com a tabela 'tenents'
+    tenents = relationship("Tenents", back_populates="house")
 
-    # Comentar landlord_id temporariamente
-    # landlord_id = Column(Integer, ForeignKey('users.id'))
-    # landlord = relationship("User")  # Relação com a tabela 'users'
+class Tenents(Base):
+    __tablename__ = 'tenents'
 
-# class Tenents(Base):
-#     __tablename__ = 'tenents'
+    id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey('houses.id')) # Relação com a tabela 'houses'
+    rent = Column(Double)
+    tenent_id = Column(String(255))  # Relação com a tabela 'users' id do cognito
 
-#     id = Column(Integer, primary_key=True, index=True)
-#     house_id = Column(Integer, ForeignKey('houses.id')) # Relação com a tabela 'houses'
-#     rent = Column(Double)
-#     tenent_id = Column(String(255))  # Relação com a tabela 'users' id do cognito
-
-#     house = relationship("House", back_populates="tenents")  # Relação com a tabela 'houses'
+    house = relationship("House", back_populates="tenents")  # Relação com a tabela 'houses'
 
 
 class Expense(Base):
