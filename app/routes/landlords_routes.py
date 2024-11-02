@@ -191,7 +191,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     
-    fileURL = None
+    file_url = None
 
     if file:
         try:
@@ -200,7 +200,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
                 os.getenv("S3_BUCKET"),
                 f"expenses/{file.filename}"
             )
-            fileURL = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/expenses/{file.filename}"
+            file_url = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/expenses/{file.filename}"
         except NoCredentialsError:
             return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
         except Exception as e:
@@ -213,7 +213,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
         description=expense.description,
         created_at=datetime.now(),
         deadline_date=expense.deadline_date,
-        file_path=fileURL
+        file_path=file_url
     )
 
     db.add(db_expense)
