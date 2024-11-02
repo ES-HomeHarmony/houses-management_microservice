@@ -29,6 +29,7 @@ jobs:
           KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
         ports:
           - 9092:9092
+        options: --network-alias kafka
 
       mysql_test:
         image: mysql:8.0
@@ -77,7 +78,7 @@ jobs:
       - name: Wait for Kafka to be Ready
         run: |
           echo "Waiting for Kafka to be ready..."
-          for i in {1..30}; do
+          for i in {1..5}; do
            nc -zv kafka 9092 && break
            echo "Kafka not ready yet..."
            sleep 5
