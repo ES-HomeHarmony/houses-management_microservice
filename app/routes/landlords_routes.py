@@ -39,8 +39,6 @@ user_cache = {}
 # Run the consumer in a separate thread to listen for responses
 def start_consumer():
     for message in consumer:
-        print(f"Received message: {message.value.get('cognito_id')}")
-        print(f"Received message: {message.value}")
         user_cache["cognito_id"] = message.value.get("cognito_id")
 
 threading.Thread(target=start_consumer, daemon=True).start()
