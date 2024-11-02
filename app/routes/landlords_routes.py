@@ -1,14 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, KafkaProducer
 import json
-from .. import models, database, schemas
 import threading
 import os
 from app.database import get_db
 from app.models import House
 from app.schemas import HouseCreate, HouseResponse
 from typing import List
+import time
 
 
 router = APIRouter(
@@ -16,47 +16,81 @@ router = APIRouter(
     tags=["houses"],
 )
 
-# consumer = KafkaConsumer(
-#     'user_topic',
-#     bootstrap_servers=['localhost:9092'],
-#     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-# )
-print("Attempting to connect to Kafka at:", os.getenv('KAFKA_BOOTSTRAP_SERVERS'))
+producer = KafkaProducer(
+    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
+# Kafka consumer for receiving responses
 consumer = KafkaConsumer(
-    'user-topic',
-    bootstrap_servers='kafka:9092',
+    'user-validation-response',
+    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
     auto_offset_reset='earliest',
-    group_id='landlord_group',
+    group_id='houses_group',
     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
-print("Connected to Kafka")
 
-# Cache temporário para armazenar cognito_id
+print("Kafka consumer initialized and listening...")
+print(f"Subscribed topics: {consumer.subscription()}")
+print(f"KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
+
 user_cache = {}
 
-def cache_user_cognito_ids():
-    """Consumes messages from Kafka and populates the user cache."""
+# Run the consumer in a separate thread to listen for responses
+def start_consumer():
     for message in consumer:
-        user_data = message.value
-        cognito_id = user_data.get("cognito_id")
-        if cognito_id:
-            user_cache[cognito_id] = user_data
-            print(f"Cached user data for cognito_id {cognito_id}: {user_data}")
+        print(f"Received message: {message.value.get('cognito_id')}")
+        print(f"Received message: {message.value}")
+        user_cache["cognito_id"] = message.value.get("cognito_id")
 
-# Executa o consumidor em uma thread separada
-threading.Thread(target=cache_user_cognito_ids, daemon=True).start()
+threading.Thread(target=start_consumer, daemon=True).start()
+
+def get_landlord_id_via_kafka(access_token: str):
+    # Send a message to Kafka for user validation
+    validation_request = {
+        "action": "validate_token",
+        "access_token": access_token
+    }
+    
+    try:
+        future = producer.send('user-validation-request', validation_request)
+        result = future.get(timeout=10)  # Block until the send is acknowledged or times out
+        print(f"Message sent successfully: {result}")
+    except Exception as e:
+        print(f"Error sending message to Kafka: {e}")
+
+    # Wait for validation response
+    cognito_id_landlord = None
+    for _ in range(10):  # Retry mechanism with limited attempts
+        print(f"Checking for cognito_id in cache: {user_cache}")
+        
+        if "cognito_id" in user_cache.keys():
+            cognito_id_landlord = user_cache.get("cognito_id")
+            print(f"Found cognito_id {cognito_id_landlord}")
+            break
+        time.sleep(1)  # Add a sleep to avoid busy-waiting
+
+    if not cognito_id_landlord:
+        raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
+
+    return cognito_id_landlord
 
 @router.post("/create", response_model=HouseResponse)
-def create_house(house: schemas.HouseCreate, db: Session = Depends(database.get_db)):
-    landlord_id = house.landlord_id
+async def create_house(house: HouseCreate, db: Session = Depends(get_db), request: Request = None):
     
-    # Ensure that the landlord's cognito_id exists in the cache
-    if landlord_id not in user_cache:
-        raise HTTPException(status_code=404, detail="Landlord not found in user service")
+    # Extract access_token from cookies
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+
+    cognito_id_landlord = get_landlord_id_via_kafka(access_token)
+
+    if not cognito_id_landlord:
+        raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
 
     db_house = House(
         name=house.name,
-        landlord_id=house.landlord_id,
+        landlord_id=cognito_id_landlord,
         address=house.address,
         city=house.city,
         state=house.state,
@@ -84,9 +118,20 @@ def create_house(house: schemas.HouseCreate, db: Session = Depends(database.get_
 
 
 # Obter todas as casas do landlord
-@router.get("/landlord/{landlord_id}", response_model=List[HouseCreate])
-def get_houses_by_landlord(landlord_id: str, db: Session = Depends(get_db)):
-    houses = db.query(House).filter(House.landlord_id == landlord_id).all()
+@router.get("/landlord", response_model=List[HouseCreate])
+def get_houses_by_landlord(request: Request = None, db: Session = Depends(get_db)):
+    
+    # Extract access_token from cookies
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+    
+    cognito_id_landlord = get_landlord_id_via_kafka(access_token)
+
+    if not cognito_id_landlord:
+        raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
+
+    houses = db.query(House).filter(House.landlord_id == cognito_id_landlord).all()
     if not houses:
         raise HTTPException(status_code=404, detail="Houses not found")
     return houses
