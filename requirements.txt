@@ -1,3 +1,5 @@
+aiokafka
+kafka-python
 fastapi[standard]
 uvicorn
 sqlalchemy

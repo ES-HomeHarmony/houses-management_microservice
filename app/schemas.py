@@ -9,6 +9,7 @@ class HouseCreate(BaseModel):
     state: str
     zipcode: str
 
+
 # Esquema para resposta ao criar uma casa
 class HouseResponse(BaseModel):
     id: int

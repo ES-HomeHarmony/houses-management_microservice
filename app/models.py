@@ -29,3 +29,4 @@ class House(Base):
 
 #     house = relationship("House", back_populates="tenents")  # Relação com a tabela 'houses'
 
+
