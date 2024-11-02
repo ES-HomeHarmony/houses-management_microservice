@@ -10,6 +10,7 @@ from botocore.exceptions import NoCredentialsError
 import os
 from dotenv import load_dotenv
 import json
+from fastapi.responses import JSONResponse
 
 
 router = APIRouter(
@@ -115,9 +116,9 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
             )
             fileURL = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/expenses/{file.filename}"
         except NoCredentialsError:
-            return {"error": "Credenciais não encontradas"}
+            return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
         except Exception as e:
-            return {"error": str(e)}
+            return JSONResponse(status_code=400, content={"error": str(e)})
     
     db_expense = Expense(
         house_id=expense.house_id,
