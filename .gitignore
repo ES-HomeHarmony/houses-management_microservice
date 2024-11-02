@@ -12,3 +12,10 @@ __pycache__/
 
 # Ignorar o ambiente virtual
 .env/
+
+# Ignorar arquivos de mídia
+htmlcov/
+
+# Ignorar arquivos de testes
+.coverage
+test_tasks.db
