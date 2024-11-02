@@ -20,8 +20,13 @@ jobs:
       kafka:
         image: wurstmeister/kafka:latest
         env:
-          KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
-          KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
+          KAFKA_BROKER_ID: 1
+          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+          KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
         ports:
           - 9092:9092
 
@@ -66,15 +71,6 @@ jobs:
           for i in {1..30}; do
             nc -zv localhost 2181 && break
             echo "Zookeeper not ready yet..."
-            sleep 5
-          done
-
-      - name: Wait for Kafka to be Ready
-        run: |
-          echo "Waiting for Kafka to be ready..."
-          for i in {1..30}; do
-            nc -zv localhost 9092 && break
-            echo "Kafka not ready yet..."
             sleep 5
           done
 
