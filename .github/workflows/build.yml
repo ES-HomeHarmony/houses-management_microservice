@@ -79,7 +79,7 @@ jobs:
         run: |
           echo "Waiting for Kafka to be ready..."
           for i in {1..5}; do
-           nc -zv kafka 9092 && break
+           nc -zv localhost 9092 && break
            echo "Kafka not ready yet..."
            sleep 5
           done
@@ -91,7 +91,7 @@ jobs:
           DB_HOST: localhost
           DB_NAME: landlord_db
           DB_PORT: 3306
-          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
           ENV: development
         run: |
           pytest --cov=./ --cov-report=xml
