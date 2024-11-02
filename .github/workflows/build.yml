@@ -11,34 +11,34 @@ jobs:
   sonarcloud:
     name: Test and SonarCloud Scan
     runs-on: ubuntu-latest
-    services:
-      zookeeper:
-        image: wurstmeister/zookeeper:latest
-        ports:
-          - 2181:2181
+    # services:
+    #   zookeeper:
+    #     image: wurstmeister/zookeeper:latest
+    #     ports:
+    #       - 2181:2181
 
-      kafka:
-        image: wurstmeister/kafka:latest
-        env:
-          KAFKA_BROKER_ID: 1
-          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-          KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-          KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
-          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
-        ports:
-          - 9092:9092
+    #   kafka:
+    #     image: wurstmeister/kafka:latest
+    #     env:
+    #       KAFKA_BROKER_ID: 1
+    #       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    #       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+    #       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+    #       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    #       KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
+    #       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+    #     ports:
+    #       - 9092:9092
 
-      mysql_test:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: VERY_SECURE_PASSWORD
-          MYSQL_DATABASE: landlord_db
-          MYSQL_USER: user
-          MYSQL_PASSWORD: VERY_SECURE_PASSWORD
-        ports:
-          - 3306:3306
+    #   mysql_test:
+    #     image: mysql:8.0
+    #     env:
+    #       MYSQL_ROOT_PASSWORD: VERY_SECURE_PASSWORD
+    #       MYSQL_DATABASE: landlord_db
+    #       MYSQL_USER: user
+    #       MYSQL_PASSWORD: VERY_SECURE_PASSWORD
+    #     ports:
+    #       - 3306:3306
 
     steps:
       - name: Checkout repository
