@@ -21,20 +21,20 @@ class HouseResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# # Esquema para criar um inquilino
-# class TenentCreate(BaseModel):
-#     house_id: int
-#     rent: int
-#     tenent_id: str
+# Esquema para criar um inquilino
+class TenentCreate(BaseModel):
+    house_id: int
+    rent: int
+    tenent_id: str
 
-# # Esquema para resposta ao criar um inquilino
-# class TenentResponse(BaseModel):
-#     id: int
-#     house_id: int
-#     rent: int
-#     tenent_id: str
+# Esquema para resposta ao criar um inquilino
+class TenentResponse(BaseModel):
+    id: int
+    house_id: int
+    rent: int
+    tenent_id: str
 
-#     model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
 # Esquema para a criação de uma expense
 class ExpenseCreate(BaseModel):
