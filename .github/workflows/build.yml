@@ -32,7 +32,7 @@ jobs:
         run: sudo apt-get install -y docker-compose  # Ensure docker-compose is available
   
       - name: Set up Docker Compose
-        run: docker-compose -f docker-compose-kafka.yml up -d
+        run: docker-compose -f docker-compose-kafka-tests.yml up -d
         
 
       - name: Set up Python
