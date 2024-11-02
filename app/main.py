@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import landlords_routes
 from app.database import Base, engine
+import os
 
 app = FastAPI()
 

@@ -18,4 +18,7 @@ htmlcov/
 
 # Ignorar arquivos de testes
 .coverage
+coverage.xml
+
+# Ingorar arquivos de banco de dados
 test_tasks.db
