@@ -9,3 +9,4 @@ requests
 pytest
 pytest-cov
 boto3
+kafka-python
