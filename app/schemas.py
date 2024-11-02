@@ -6,7 +6,6 @@ from fastapi import UploadFile
 # Esquema para criar uma casa
 class HouseCreate(BaseModel):
     name: str
-    landlord_id: str
     address: str
     city: str
     state: str
