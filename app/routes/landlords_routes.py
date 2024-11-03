@@ -52,18 +52,46 @@ consumer = KafkaConsumer(
     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
+# Kafka consumer for user creation responses
+user_creation_consumer = KafkaConsumer(
+    'user-creation-response',
+    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
+    auto_offset_reset='earliest',
+    group_id='user_creation_group',
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+)
+
+# Kafka consumer for tenant info responses
+tenant_get_info_consumer = KafkaConsumer(
+    'tenant_info_response',
+    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
+    auto_offset_reset='earliest',
+    group_id='tenant_info_group',
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+)
+
 print("Kafka consumer initialized and listening...")
 print(f"Subscribed topics: {consumer.subscription()}")
 print(f"KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
 
 user_cache = {}
+user_cache2 = {}
+tenant_data_dict = []
 
 # Run the consumer in a separate thread to listen for responses
 def start_consumer():
     for message in consumer:
         user_cache["cognito_id"] = message.value.get("cognito_id")
+def start_consumer_2():
+    for message in user_creation_consumer:
+        user_cache2["cognito_id"] = message.value.get("cognito_id")
+def start_consumer_3():
+    for message in tenant_get_info_consumer:
+        tenant_data_dict.append(message.value)
 
 threading.Thread(target=start_consumer, daemon=True).start()
+threading.Thread(target=start_consumer_2, daemon=True).start()
+threading.Thread(target=start_consumer_3, daemon=True).start()
 
 def get_landlord_id_via_kafka(access_token: str):
     # Send a message to Kafka for user validation
@@ -86,7 +114,7 @@ def get_landlord_id_via_kafka(access_token: str):
         
         if "cognito_id" in user_cache.keys():
             cognito_id_landlord = user_cache.get("cognito_id")
-            print(f"Found cognito_id {cognito_id_landlord}")
+            print(f"Found cognito_id for landlord_id {cognito_id_landlord}")
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
 
@@ -94,6 +122,74 @@ def get_landlord_id_via_kafka(access_token: str):
         raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
 
     return cognito_id_landlord
+
+def create_user_in_user_microservice(user_data: dict):
+    # Send a message to Kafka for user creation
+    user_creation_request = {
+        "action": "create_user",
+        "user_data": user_data
+    }
+    
+    try:
+        future = producer.send('user-creation-request', user_creation_request)
+        result = future.get(timeout=10)  # Block until the send is acknowledged or times out
+        print(f"Message sent successfully: {result}")
+    except Exception as e:
+        print(f"Error sending message to Kafka: {e}")
+
+    # Wait for creation response
+    cognito_id = None
+    for _ in range(10):  # Retry mechanism with limited attempts
+        print(f"Checking for cognito_id in cache: {user_cache}")
+        
+        if "cognito_id" in user_cache2.keys():
+            cognito_id = user_cache2.get("cognito_id")
+            print(f"Found cognito_id tenant {cognito_id}")
+            break
+        time.sleep(1)  # Add a sleep to avoid busy-waiting
+
+    if not cognito_id:
+        raise HTTPException(status_code=404, detail="User not found or unauthorized")
+
+    return cognito_id
+
+def get_tenant_data(tenant_ids: list):
+    # Send a message to Kafka for tenant data
+    validation_request = {
+        "action": "get_tenants_data",
+        "tenant_ids": tenant_ids
+    }
+    
+    try:
+        future = producer.send('tenant_info_request', validation_request)
+        result = future.get(timeout=10)  # Block until the send is acknowledged or times out
+        print(f"Message sent successfully: {result}")
+    except Exception as e:
+        print(f"Error sending message to Kafka: {e}")
+
+    # Wait for the response
+    tenant_data = []
+    processed_tenant_ids = set()
+
+    for _ in range(10):  # Retry mechanism with limited attempts
+        if tenant_data_dict:
+            for tenant_entry in tenant_data_dict:
+                for tenant_id, tenant_name in tenant_entry.items():
+                    if tenant_id in tenant_ids and tenant_id not in processed_tenant_ids:
+                        tenant_data.append({"tenant_id": tenant_id, "name": tenant_name})
+                        processed_tenant_ids.add(tenant_id)  # Mark as processed
+                        print(f"Found tenant data: {tenant_id} - {tenant_name}")
+
+        time.sleep(1)  # Add a sleep to avoid busy-waiting
+    
+    tenant_data_dict.clear()  # Clear the cache after processing
+
+    if not tenant_data:
+        raise HTTPException(status_code=404, detail="Tenant data not found")
+
+    return tenant_data
+
+
 
 # Criar uma casa para um landlord
 @router.post("/create", response_model=HouseResponse)
@@ -127,18 +223,30 @@ async def create_house(house: HouseCreate, db: Session = Depends(get_db), reques
 
 @router.post("/tenents", response_model=TenentResponse)
 def create_tenent(tenent: TenentCreate, db: Session = Depends(get_db)):
+    
+    print(tenent)
+
+    # Create a new user in the user microservice
+    user_data = {
+        "name": tenent.name,
+        "email": tenent.email
+    }
+
+    cognito_id = create_user_in_user_microservice(user_data)
+
     db_tenent = Tenents(
         house_id=tenent.house_id,
         rent=tenent.rent,
-        tenent_id=tenent.tenent_id
+        tenent_id=cognito_id
     )
+
     db.add(db_tenent)
     db.commit()
     db.refresh(db_tenent)
     return db_tenent
 
 # Obter todas as casas do landlord
-@router.get("/landlord", response_model=List[HouseCreate])
+@router.get("/landlord", response_model=List[HouseResponse])
 def get_houses_by_landlord(request: Request = None, db: Session = Depends(get_db)):
     
     # Extract access_token from cookies
@@ -159,13 +267,11 @@ def get_houses_by_landlord(request: Request = None, db: Session = Depends(get_db
 # Obter determinada casa do landlord pelo id da casa e os tenants
 @router.get("/landlord/house/{house_id}")
 def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request: Request = None):
-    
     access_token = request.cookies.get("access_token")
     if not access_token:
         raise HTTPException(status_code=401, detail="Access token missing")
     
     landlord_id = get_landlord_id_via_kafka(access_token)
-
     if not landlord_id:
         raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
     
@@ -174,10 +280,33 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
         raise HTTPException(status_code=404, detail="House not found")
     
     tenents = db.query(Tenents).filter(Tenents.house_id == house_id).all()
-    
+    if not tenents:
+        return {"house": house, "tenents": []}  # Return an empty tenant list if none found
+
+    # Collect all cognito IDs to request data for tenants
+    list_cognito_ids = [tenent.tenent_id for tenent in tenents]
+
+    # Retrieve tenant data
+    tenants_data = get_tenant_data(list_cognito_ids)
+
+    # Structure the tenant data for the response
+    structured_tenants = []
+    for tenent in tenents:
+        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenent.tenent_id), None)
+        if tenant_info:
+            structured_tenants.append({
+                "tenant_id": tenent.tenent_id,
+                "name": tenant_info["name"],
+                "email": tenant_info.get("email"),
+                "rent": tenent.rent
+            })
+
+    # Print structured tenant data for debugging
+    print("Structured tenants data:", structured_tenants)
+
     return {
         "house": house,
-        "tenents": tenents
+        "tenents": structured_tenants
     }
 
 
