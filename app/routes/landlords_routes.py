@@ -229,3 +229,68 @@ def get_expenses_by_house(house_id: int, db: Session = Depends(get_db)):
     if not expenses:
         raise HTTPException(status_code=404, detail=f"Expenses not found for house {house_id}")
     return expenses
+
+
+# @router.get("/pending-payments", response_model=List[dict])
+# def get_pending_payments(request: Request = None, db: Session = Depends(get_db)):
+#     # Extract access_token from cookies
+#     access_token = request.cookies.get("access_token")
+#     if not access_token:
+#         raise HTTPException(status_code=401, detail="Access token missing")
+    
+#     cognito_id_landlord = get_landlord_id_via_kafka(access_token)
+
+#     if not cognito_id_landlord:
+#         raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
+
+#     # Retrieve all houses belonging to the landlord
+#     houses = db.query(House).filter(House.landlord_id == cognito_id_landlord).all()
+#     if not houses:
+#         raise HTTPException(status_code=404, detail="Houses not found")
+
+#     pending_payments = []
+
+#     # Retrieve pending payments for each house
+#     for house in houses:
+#         tenents = db.query(Tenents).filter(Tenents.house_id == house.id).all()
+#         for tenent in tenents:
+#             expenses = db.query(Expense).filter(
+#                 Expense.house_id == house.id,
+#                 Expense.deadline_date >= datetime.now(),  # Ensure the payment deadline is in the future
+#                 Expense.amount > 0  # Filter for expenses with pending amounts
+#             ).all()
+            
+#             for expense in expenses:
+#                 pending_payments.append({
+#                     "tenant_name": tenent.tenent_id,  # Replace with `tenent.name` if you have a name field
+#                     "amount": expense.amount,
+#                     "payment_deadline": expense.deadline_date
+#                 })
+
+#     if not pending_payments:
+#         raise HTTPException(status_code=404, detail="No pending payments found")
+
+#     return pending_payments
+
+@router.get("/landlord/house/{house_id}")
+def get_house_with_tenants_and_expenses(house_id: int, db: Session = Depends(get_db), request: Request = None):
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+    
+    landlord_id = get_landlord_id_via_kafka(access_token)
+    if not landlord_id:
+        raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
+    
+    house = db.query(House).filter(House.landlord_id == landlord_id, House.id == house_id).first()
+    if not house:
+        raise HTTPException(status_code=404, detail="House not found")
+    
+    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+    pending_expenses = db.query(Expense).filter(Expense.house_id == house_id, Expense.status == "pending").all()
+    
+    return {
+        "house": house,
+        "tenants": tenants,
+        "pending_expenses": pending_expenses
+    }

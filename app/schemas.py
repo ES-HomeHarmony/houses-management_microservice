@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date
 from fastapi import UploadFile
+from typing import List
 
 # Esquema para criar uma casa
 class HouseCreate(BaseModel):
@@ -43,8 +44,13 @@ class ExpenseCreate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     deadline_date: Optional[date] = None
+    tenant_ids: Optional[List[int]] = None  # IDs of tenants associated with the expense
 
-# Esquema para a resposta ao criar uma expense
+# Esquema para resposta ao criar uma despesa (Expense)
+class TenantExpenseDetail(BaseModel):
+    tenant_id: int
+    status: str  # Status for the specific tenant's share of the expense
+
 class ExpenseResponse(BaseModel):
     id: int
     house_id: int
@@ -54,5 +60,6 @@ class ExpenseResponse(BaseModel):
     created_at: date
     deadline_date: Optional[date] = None
     file_path: Optional[str] = None
+    tenants: List[TenantExpenseDetail]  # List of tenants associated with the expense, including their statuses
 
     model_config = ConfigDict(from_attributes=True)
