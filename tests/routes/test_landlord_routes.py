@@ -367,3 +367,97 @@ def test_get_expenses_by_house_when_there_is_no_expenses(client):
     assert response.status_code == 404
     response_json = response.json()
     assert response_json["detail"] == "Expenses not found for house 1"
+
+# Test function for creating a tenant and associating it with a house
+def test_create_tenant(client):
+    
+    tenant_data = {
+        "house_id": 1,
+        "rent": 1000,
+        "tenent_id": "test-tenant-id"
+    }
+
+    response = client.post(
+        "houses/tenents",
+        json=tenant_data
+    )
+
+    assert response.status_code == 200
+    response_json = response.json()
+    assert response_json["house_id"] == 1
+    assert response_json["rent"] == 1000
+    assert response_json["tenent_id"] == "test-tenant-id"
+
+# Test fucntion for getting all tenants associated with a house
+@patch("app.routes.landlords_routes.get_landlord_id_via_kafka")
+def test_get_tenants_by_house(mocked_kafka_cognito_id, client):
+    mocked_kafka_cognito_id.return_value = "test-landlord-id"
+    access_token = "mock_access_token"
+    
+    tenants_list = {
+        "house": {
+            "id": 1,
+            "address": "123 Test St",
+            "name": "House 1",
+            "state": "TS",
+            "landlord_id": "test-landlord-id",
+            "city": "Test City",
+            "zipcode": "12345"
+        },
+        "tenents": [
+            {
+                "rent": 1000,
+                "tenent_id": "test-tenant-id",
+                "id": 1,
+                "house_id": 1,
+            }
+        ]
+    }
+    
+    with patch("sqlalchemy.orm.Query.first", return_value=tenants_list["house"]), \
+         patch("sqlalchemy.orm.Query.all", return_value=tenants_list["tenents"]):
+        client.cookies.set("access_token", access_token)
+        response = client.get("houses/landlord/house/1")
+        assert response.status_code == 200
+        response_json = response.json()
+        assert "house" in response_json
+        assert "tenents" in response_json
+        assert response_json["tenents"][0]["rent"] == 1000
+        assert response_json["tenents"][0]["tenent_id"] == "test-tenant-id"
+
+    mocked_kafka_cognito_id.assert_called_once_with(access_token)
+
+# Test fucntion for getting all tenants associated with a house when there is no access_token
+def test_get_tenants_by_house_with_no_access_token(client):
+    
+    response = client.get("houses/landlord/house/1")
+    assert response.status_code == 401
+    response_json = response.json()
+    assert response_json["detail"] == "Access token missing"
+
+# Test fucntion for getting all tenants associated with a house when the landlord is not found
+@patch("app.routes.landlords_routes.get_landlord_id_via_kafka")
+def test_get_tenants_by_house_with_no_landlord(mocked_kafka_cognito_id, client):
+    mocked_kafka_cognito_id.return_value = None
+    access_token = "mock_access_token"
+
+    client.cookies.set("access_token", access_token)
+    response = client.get("houses/landlord/house/1")
+    assert response.status_code == 404
+    response_json = response.json()
+    assert response_json["detail"] == "Landlord not found or unauthorized"
+    mocked_kafka_cognito_id.assert_called_once_with(access_token)
+
+# Test fucntion for getting all tenants associated with a house when the house is not found
+@patch("app.routes.landlords_routes.get_landlord_id_via_kafka")
+def test_get_tenants_by_house_with_no_house_found(mocked_kafka_cognito_id, client):
+    mocked_kafka_cognito_id.return_value = "test-landlord-id"
+    access_token = "mock_access_token"
+
+    with patch("sqlalchemy.orm.Query.first", return_value=None):
+        client.cookies.set("access_token", access_token)
+        response = client.get("houses/landlord/house/1")
+        assert response.status_code == 404
+        response_json = response.json()
+        assert response_json["detail"] == "House not found"
+    
