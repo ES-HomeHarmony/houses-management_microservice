@@ -1,0 +1,59 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: landlord_mysqlDB
+    environment:
+      MYSQL_ROOT_PASSWORD: VERY_SECURE_PASSWORD
+      MYSQL_DATABASE: landlord_db
+      MYSQL_USER: user
+      MYSQL_PASSWORD: VERY_SECURE_PASSWORD
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "user", "--password=VERY_SECURE_PASSWORD"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data_landlord:/var/lib/mysql
+    networks:
+      - app_network
+
+
+  # landlord_microservice:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: landlord_microservice
+  #   environment:
+  #     # DB_USER: admin
+  #     # DB_PASSWORD: HomeHarmony2024#
+  #     # DB_HOST: landlord-db.cx0i8y6gim4e.eu-north-1.rds.amazonaws.com
+  #     # DB_NAME: landlord_db
+  #     DB_USER: user
+  #     DB_PASSWORD: VERY_SECURE_PASSWORD
+  #     DB_HOST: localhost
+  #     DB_NAME: landlord_db
+  #     DB_PORT: 3306
+  #     # AWS_REGION: eu-north-1
+  #     # COGNITO_USER_POOL_ID: eu-north-1_BZVwENxbX
+  #     # COGNITO_APP_CLIENT_ID: 1ks0163ckccdfje0a1h7h78ffl
+  #     KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #     # kafka:
+  #     #   condition: service_healthy
+  #   networks:
+  #     - app_network
+
+
+volumes:
+  db_data_landlord:
+
+networks:
+  app_network:
+    external: true
