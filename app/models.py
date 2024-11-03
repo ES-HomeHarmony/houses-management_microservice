@@ -40,6 +40,7 @@ class Expense(Base):
     created_at = Column(Date, default=datetime.date.today)
     deadline_date = Column(Date, nullable=True)
     file_path = Column(String(255), nullable=True)
+    status = Column(String(255), default='pending')  # Status of the expense
 
     house = relationship("House")
     tenants = relationship("TenantExpense", back_populates="expense")

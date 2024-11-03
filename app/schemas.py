@@ -60,6 +60,7 @@ class ExpenseResponse(BaseModel):
     created_at: date
     deadline_date: Optional[date] = None
     file_path: Optional[str] = None
+    status: str
     tenants: List[TenantExpenseDetail]  # List of tenants associated with the expense, including their statuses
 
     model_config = ConfigDict(from_attributes=True)
