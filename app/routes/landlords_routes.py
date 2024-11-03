@@ -222,10 +222,15 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     return db_expense
 
 
-# Obter todas as despesas de uma casa
+# Endpoint to retrieve all expenses for a specific house by its ID.
 @router.get("/expenses/{house_id}", response_model=List[ExpenseResponse])
 def get_expenses_by_house(house_id: int, db: Session = Depends(get_db)):
+    # Query the database to get all expenses that match the provided house ID.
     expenses = db.query(Expense).filter(Expense.house_id == house_id).all()
+    
+    # If no expenses are found, raise a 404 Not Found error with a descriptive message.
     if not expenses:
         raise HTTPException(status_code=404, detail=f"Expenses not found for house {house_id}")
+    
+    # Return the list of expenses as a response, formatted according to the ExpenseResponse model.
     return expenses
