@@ -138,7 +138,7 @@ def create_tenent(tenent: TenentCreate, db: Session = Depends(get_db)):
     return db_tenent
 
 # Obter todas as casas do landlord
-@router.get("/landlord", response_model=List[HouseCreate])
+@router.get("/landlord", response_model=List[HouseResponse])
 def get_houses_by_landlord(request: Request = None, db: Session = Depends(get_db)):
     
     # Extract access_token from cookies
