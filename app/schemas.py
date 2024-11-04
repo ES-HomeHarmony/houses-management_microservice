@@ -18,6 +18,10 @@ class HouseResponse(BaseModel):
     id: int
     name: str
     landlord_id: str
+    address: str
+    city: str
+    state: str
+    zipcode: str
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -26,7 +30,9 @@ class HouseResponse(BaseModel):
 class TenentCreate(BaseModel):
     house_id: int
     rent: int
-    tenent_id: str
+    tenent_id: Optional[str] = None
+    name: str
+    email: str
 
 # Esquema para resposta ao criar um inquilino
 class TenentResponse(BaseModel):
