@@ -40,4 +40,5 @@ class Expense(Base):
     file_path = Column(String(255), nullable=True)
 
     # Adicionar uma lista com os tenents_ids
+    
     house = relationship("House")  # Relação com a tabela 'houses'
