@@ -102,17 +102,26 @@ def test_create_house_by_landlord_not_found(mocked_cognito_id, client):
 
 @patch("app.routes.landlords_routes.get_landlord_id_via_kafka")
 def test_get_houses_by_landlord(mock_get_landlord, client):
+    
     house_list = [
-        {
-            "id": 1,
-            "name": "House 1",
-            "landlord_id": "test-landlord-id",
-        },
-        {
-            "id": 2,
-            "name": "House 2",
-            "landlord_id": "test-landlord-id",
-        }
+        House(
+            id=1,
+            name="House 1",
+            landlord_id="test-landlord-id",
+            address="123 Test St",
+            city="Test City",
+            state="TS",
+            zipcode="12345"
+        ),
+        House(
+            id=2,
+            name="House 2",
+            landlord_id="test-landlord-id",
+            address="456 Another St",
+            city="Test City",
+            state="TS",
+            zipcode="67890"
+        )
     ]
 
     mock_get_landlord.return_value = "test-landlord-id"
