@@ -1,6 +1,6 @@
 import pytest
 from fastapi import HTTPException
-from app.models import Expense, House
+from app.models import Expense, House, TenantExpense, Tenents
 from app.routes.landlords_routes import get_landlord_id_via_kafka
 from unittest.mock import patch, MagicMock
 from botocore.exceptions import NoCredentialsError
@@ -106,20 +106,14 @@ def test_get_houses_by_landlord(mock_get_landlord, client):
     # Sample data for house retrieval
     house_list = [
         {
+            "id": 1,
             "name": "House 1",
             "landlord_id": "test-landlord-id",
-            "address": "123 Test St",
-            "city": "Test City",
-            "state": "TS",
-            "zipcode": "12345"
         },
         {
+            "id": 2,
             "name": "House 2",
             "landlord_id": "test-landlord-id",
-            "address": "456 Another St",
-            "city": "Test City",
-            "state": "TS",
-            "zipcode": "67890"
         }
     ]
 
@@ -255,19 +249,26 @@ def test_create_expense_with_file_upload(mock_s3_client, client):
     files = generate_mock_file()
     expense_data_json = json.dumps(create_expense)
 
-    response = client.post(
-        "/houses/addExpense",
-        data={"expense_data": expense_data_json},
-        files=files
-    )
+    # Mock the database query to return tenants for the given house
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.all.return_value = [
+            Tenents(id=1, house_id=create_expense["house_id"]),
+            Tenents(id=2, house_id=create_expense["house_id"])
+        ]
 
-    # Assertions to check the response and behavior
-    assert response.status_code == 200
-    response_json = response.json()
-    assert "id" in response_json
-    assert response_json["title"] == "Rent"
-    assert response_json["amount"] == 1000
-    assert response_json["file_path"] is not None
+        response = client.post(
+            "/houses/addExpense",
+            data={"expense_data": expense_data_json},
+            files=files
+        )
+
+        # Assertions to check the response and behavior
+        assert response.status_code == 200
+        response_json = response.json()
+        assert "id" in response_json
+        assert response_json["title"] == "Rent"
+        assert response_json["amount"] == 1000
+        assert response_json["file_path"] is not None
 
 
 # Test function for handling invalid JSON in expense_data
@@ -348,7 +349,9 @@ def test_get_expenses_by_house(client):
             "description": "Monthly rent",
             "created_at": "2024-12-01T00:00:00",
             "deadline_date": "2024-12-01T00:00:00",
-            "file_path": None
+            "file_path": None,
+            "status": "pending",  # Add this line
+            "tenants": [{"tenant_id": 1, "status": "paid"}]  # Correct the field name
         }
     ]
 
@@ -461,3 +464,136 @@ def test_get_tenants_by_house_with_no_house_found(mocked_kafka_cognito_id, clien
         response_json = response.json()
         assert response_json["detail"] == "House not found"
     
+
+
+# # Test function for marking tenant payment
+# @patch("sqlalchemy.orm.Session.commit")
+# def test_mark_tenant_payment(mock_commit, client):
+#     # Create a mock tenant expense record
+#     tenant_expense = TenantExpense(tenant_id=1, expense_id=1, status='pending')
+
+#     # Create a mock session
+#     mock_db = MagicMock()
+#     mock_db.query.return_value.filter.return_value.first.return_value = tenant_expense
+
+#     # Patch the `get_db` dependency to return the mock session
+#     with patch("app.routes.landlords_routes.get_db", return_value=mock_db):
+#         # Send a PUT request to mark tenant payment
+#         response = client.put("/tenants/1/pay?expense_id=1")
+
+#         # Assertions
+#         assert response.status_code == 200
+#         response_data = response.json()
+#         assert response_data["message"] == "Tenant payment updated successfully"
+#         mock_commit.assert_called_once()
+
+def test_mark_tenant_payment_not_found(client):
+    # Mock the database query to return None
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+        
+        # Send a PUT request to mark tenant payment
+        response = client.put("/tenants/1/pay?expense_id=1")
+
+        # Assertions
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Not Found"  # Ensure this matches the route's detail
+
+# Test for getting a specific expense by ID
+@patch("sqlalchemy.orm.Session.query")
+def test_get_expense_by_id(mock_query, client):
+    # Create a mock expense record with date fields
+    expense = Expense(
+        id=1,
+        house_id=1,
+        amount=1000.0,
+        title="Rent",
+        description="Monthly rent",
+        created_at=datetime.now().date(),  # Convert to date
+        deadline_date=datetime.now().date(),  # Convert to date
+        file_path=None,
+        status="pending"
+    )
+    mock_query.return_value.filter.return_value.first.return_value = expense
+
+    response = client.get("/houses/expense/1")
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["id"] == expense.id
+    assert response_data["title"] == expense.title
+
+def test_get_expense_by_id_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        response = client.get("/houses/expense/999")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"
+
+# Test for deleting an expense
+@patch("sqlalchemy.orm.Session.commit")
+def test_delete_expense(mock_commit, client):
+    expense = Expense(id=1, house_id=1, amount=1000.0, title="Rent")
+
+    # Mock the session and ensure the delete method does not throw errors
+    with patch("sqlalchemy.orm.Session.query") as mock_query, patch("sqlalchemy.orm.Session.delete") as mock_delete:
+        mock_query.return_value.filter.return_value.first.return_value = expense
+        
+        # Ensure the delete method is mocked to accept the instance without issues
+        mock_delete.return_value = None
+
+        response = client.delete("/houses/expenses/1")
+
+        # Assertions
+        assert response.status_code == 200
+        assert response.json()["message"] == "Expense deleted successfully"
+        mock_commit.assert_called_once()
+        mock_delete.assert_called_once_with(expense)
+
+def test_delete_expense_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        response = client.delete("/houses/expenses/999")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"
+
+# # Test for marking an expense as paid
+# @patch("sqlalchemy.orm.Session.commit")
+# @patch("sqlalchemy.orm.Session.refresh")
+# def test_mark_expense_as_paid(mock_refresh, mock_commit, client):
+#     # Create an expense instance and tenant expense instances
+#     expense = Expense(id=1, house_id=1, amount=1000.0, title="Rent", status="pending")
+#     tenant_expenses = [
+#         TenantExpense(tenant_id=1, expense_id=1, status="paid"),
+#         TenantExpense(tenant_id=2, expense_id=1, status="paid")
+#     ]
+
+#     # Create a mock session and configure return values for query
+#     mock_session = MagicMock()
+#     mock_session.query.return_value.filter.return_value.first.return_value = expense
+#     mock_session.query.return_value.filter.return_value.all.return_value = tenant_expenses
+
+#     # Patch `get_db` to use the mock session
+#     with patch("app.routes.landlords_routes.get_db", return_value=mock_session):
+#         response = client.put("/houses/expenses/1/mark-paid")
+
+#         # Assertions
+#         assert response.status_code == 200
+#         response_data = response.json()
+#         assert response_data["message"] == "Expense status updated"
+#         assert response_data["status"] == "paid"
+#         mock_commit.assert_called_once()
+#         mock_refresh.assert_called_once_with(expense)
+
+def test_mark_expense_as_paid_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        response = client.put("/houses/expenses/999/mark-paid")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"

@@ -5,8 +5,8 @@ import json
 import threading
 import os
 from app.database import get_db
-from app.models import House, Expense, Tenents
-from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse
+from app.models import House, Expense, Tenents, TenantExpense
+from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail
 from typing import List
 from datetime import datetime
 import boto3
@@ -191,6 +191,36 @@ def get_tenant_data(tenant_ids: list):
 
 
 
+def update_expense_status_if_paid(expense_id: int, db: Session):
+    # Query all TenantExpense entries related to the given expense
+    tenant_expenses = db.query(TenantExpense).filter(TenantExpense.expense_id == expense_id).all()
+
+    # Check if all tenant expenses have a status of 'paid'
+    all_paid = all(te.status == 'paid' for te in tenant_expenses)
+
+    if all_paid:
+        # If all tenant expenses are marked as paid, update the main expense status
+        expense = db.query(Expense).filter(Expense.id == expense_id).first()
+        if expense:
+            expense.status = 'paid'
+            db.commit()
+            db.refresh(expense)
+        else:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        
+def create_tenant_expenses(expense_id: int, house_id: int, db: Session):
+    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+    if not tenants:
+        raise HTTPException(status_code=404, detail="No tenants found for the given house")
+
+    tenant_expenses = []
+    for tenant in tenants:
+        tenant_expense = TenantExpense(tenant_id=tenant.id, expense_id=expense_id, status='pending')
+        tenant_expenses.append(tenant_expense)
+
+    db.bulk_save_objects(tenant_expenses)
+    db.commit()
+
 # Criar uma casa para um landlord
 @router.post("/create", response_model=HouseResponse)
 async def create_house(house: HouseCreate, db: Session = Depends(get_db), request: Request = None):
@@ -342,12 +372,16 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
         description=expense.description,
         created_at=datetime.now(),
         deadline_date=expense.deadline_date,
-        file_path=file_url
+        file_path=file_url,
+        status="pending"
     )
 
     db.add(db_expense)
     db.commit()
     db.refresh(db_expense)
+
+    create_tenant_expenses(db_expense.id, db_expense.house_id, db)
+
     return db_expense
 
 
@@ -358,3 +392,79 @@ def get_expenses_by_house(house_id: int, db: Session = Depends(get_db)):
     if not expenses:
         raise HTTPException(status_code=404, detail=f"Expenses not found for house {house_id}")
     return expenses
+
+
+# @router.get("/expenses/{expense_id}/tenants", response_model=List[TenantExpenseDetail])
+# def get_tenant_payment_status(expense_id: int, db: Session = Depends(get_db)):
+#     tenant_expenses = db.query(TenantExpense).filter(TenantExpense.expense_id == expense_id).all()
+
+#     if not tenant_expenses:
+#         raise HTTPException(status_code=404, detail="No tenant payment details found for this expense")
+
+#     tenant_statuses = [
+#         {
+#             "tenant_id": te.tenant_id,
+#             "status": te.status,
+#             "tenant_name": db.query(Tenents).filter(Tenents.id == te.tenant_id).first().tenent_id  # Replace with actual tenant name field
+#         }
+#         for te in tenant_expenses
+#     ]
+
+#     return tenant_statuses
+
+
+@router.put("/tenants/{tenant_id}/pay")
+def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(get_db)):
+    tenant_expense = db.query(TenantExpense).filter(
+        TenantExpense.tenant_id == tenant_id,
+        TenantExpense.expense_id == expense_id
+    ).first()
+
+    if not tenant_expense:
+        raise HTTPException(status_code=404, detail="Tenant expense record not found")
+
+    # Update the tenant's payment status to 'paid'
+    tenant_expense.status = 'paid'
+    db.commit()
+
+    # Check if the main expense should now be marked as 'paid'
+    update_expense_status_if_paid(expense_id, db)
+
+    return {"message": "Tenant payment updated successfully"}
+
+# Endpoint to get a specific expense by its ID
+@router.get("/expense/{expense_id}", response_model=ExpenseResponse)
+def get_expense_by_id(expense_id: int, db: Session = Depends(get_db)):
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    print(expense.__dict__)
+    return expense
+
+
+#delete expenses from a house
+@router.delete("/expenses/{expense_id}")
+def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    
+    db.delete(expense)
+    db.commit()
+    return {"message": "Expense deleted successfully"}
+
+@router.put("/expenses/{expense_id}/mark-paid")
+def mark_expense_as_paid(expense_id: int, db: Session = Depends(get_db)):
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    tenant_expenses = db.query(TenantExpense).filter(TenantExpense.expense_id == expense_id).all()
+    all_paid = all(te.status == 'paid' for te in tenant_expenses)
+
+    if all_paid:
+        expense.status = 'paid'
+        db.commit()
+        db.refresh(expense)
+
+    return {"message": "Expense status updated", "status": expense.status}
