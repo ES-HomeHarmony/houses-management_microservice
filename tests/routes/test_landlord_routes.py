@@ -106,20 +106,14 @@ def test_get_houses_by_landlord(mock_get_landlord, client):
     # Sample data for house retrieval
     house_list = [
         {
+            "id": 1,
             "name": "House 1",
             "landlord_id": "test-landlord-id",
-            "address": "123 Test St",
-            "city": "Test City",
-            "state": "TS",
-            "zipcode": "12345"
         },
         {
+            "id": 2,
             "name": "House 2",
             "landlord_id": "test-landlord-id",
-            "address": "456 Another St",
-            "city": "Test City",
-            "state": "TS",
-            "zipcode": "67890"
         }
     ]
 
