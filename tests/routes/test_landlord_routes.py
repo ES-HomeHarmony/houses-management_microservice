@@ -6,6 +6,10 @@ from unittest.mock import patch, MagicMock
 from botocore.exceptions import NoCredentialsError
 from datetime import datetime
 import json
+from sqlalchemy.orm import Session
+from app.models import Expense, TenantExpense
+from tests.conftest import override_get_db
+from fastapi.testclient import TestClient
 
 
 # Define the data to be sent in the POST request
@@ -367,3 +371,30 @@ def test_get_expenses_by_house_when_there_is_no_expenses(client):
     assert response.status_code == 404
     response_json = response.json()
     assert response_json["detail"] == "Expenses not found for house 1"
+
+def create_mock_expense_and_tenant(session):
+    expense = Expense(id=1, status='unpaid')
+    tenant_expense1 = TenantExpense(tenant_id=1, expense_id=1, status='paid')
+    tenant_expense2 = TenantExpense(tenant_id=2, expense_id=1, status='paid')
+    
+    session.add(expense)
+    session.add(tenant_expense1)
+    session.add(tenant_expense2)
+    session.commit()
+
+def test_mark_expense_as_paid():
+    # Arrange: set up initial data in the test database
+    db: Session = next(override_get_db())
+    create_mock_expense_and_tenant(db)
+
+    # Act: call the endpoint
+    response = test_client.put("/expenses/1/mark-paid")
+
+    # Assert: check the response and database state
+    assert response.status_code == 200
+    assert response.json() == {"message": "Expense status updated", "status": "paid"}
+
+    updated_expense = db.query(Expense).filter(Expense.id == 1).first()
+    assert updated_expense.status == 'paid'
+
+    db.rollback()  # Clean up after the test
