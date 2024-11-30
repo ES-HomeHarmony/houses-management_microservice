@@ -390,3 +390,4 @@ def test_mark_expense_as_paid_not_found(client):
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Expense not found"
+        
