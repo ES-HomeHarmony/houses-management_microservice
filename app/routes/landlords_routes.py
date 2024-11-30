@@ -6,7 +6,7 @@ import threading
 import os
 from app.database import get_db
 from app.models import House, Expense, Tenents, TenantExpense
-from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail
+from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail, ContractCreate
 from typing import List
 from datetime import datetime
 import boto3
@@ -468,3 +468,45 @@ def mark_expense_as_paid(expense_id: int, db: Session = Depends(get_db)):
         db.refresh(expense)
 
     return {"message": "Expense status updated", "status": expense.status}
+
+@router.post("/uploadContract")
+def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    file_url = None
+
+    # Parse the JSON string into the ExpenseCreate model
+    try:
+        contract_create = ContractCreate(**json.loads(contract_data))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    
+    if file:
+        try:
+
+            if " " in file.filename:
+                file.filename = file.filename.replace(" ", "_")
+
+            s3_client.upload_fileobj(
+                file.file,
+                os.getenv("S3_BUCKET"),
+                f"contracts/{file.filename}"
+            )
+
+            print(f"File uploaded successfully: {file.filename}")
+
+            file_url = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/contracts/{file.filename}"
+        
+        except NoCredentialsError:
+            return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
+        
+    tenant = db.query(Tenents).filter(Tenents.id == contract_create.tenant_id).first()
+
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    tenant.contract = file_url
+    db.commit()
+    db.refresh(tenant)
+
+    return {"message": "Contract uploaded successfully", "file_url": file_url}
