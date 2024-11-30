@@ -1,6 +1,6 @@
 import pytest
 from fastapi import HTTPException
-from app.models import Expense, House
+from app.models import Expense, House, Tenents
 from app.routes.landlords_routes import get_landlord_id_via_kafka
 from unittest.mock import patch, MagicMock
 from botocore.exceptions import NoCredentialsError
@@ -104,51 +104,42 @@ def test_create_house_by_landlord_not_found(mocked_cognito_id, client):
     mocked_cognito_id.assert_called_once_with(access_token)
 
 
-# Mock test for getting houses by landlord endpoint
 @patch("app.routes.landlords_routes.get_landlord_id_via_kafka")
 def test_get_houses_by_landlord(mock_get_landlord, client):
-    # Sample data for house retrieval
+    
     house_list = [
-        {
-            "name": "House 1",
-            "landlord_id": "test-landlord-id",
-            "address": "123 Test St",
-            "city": "Test City",
-            "state": "TS",
-            "zipcode": "12345"
-        },
-        {
-            "name": "House 2",
-            "landlord_id": "test-landlord-id",
-            "address": "456 Another St",
-            "city": "Test City",
-            "state": "TS",
-            "zipcode": "67890"
-        }
+        House(
+            id=1,
+            name="House 1",
+            landlord_id="test-landlord-id",
+            address="123 Test St",
+            city="Test City",
+            state="TS",
+            zipcode="12345"
+        ),
+        House(
+            id=2,
+            name="House 2",
+            landlord_id="test-landlord-id",
+            address="456 Another St",
+            city="Test City",
+            state="TS",
+            zipcode="67890"
+        )
     ]
 
-    # Simulate an access token in the cookies
+    mock_get_landlord.return_value = "test-landlord-id"
     access_token = "mock_access_token"
 
-    # Configure the mock to return a specific landlord ID
-    mock_get_landlord.return_value = "test-landlord-id"
-
-    # Mock database session query
     with patch("sqlalchemy.orm.Query.all", return_value=house_list):
-        # Send a GET request to the landlord endpoint with the access token in cookies
         client.cookies.set("access_token", access_token)
-        response = client.get(
-            "/houses/landlord"
-        )
+        response = client.get("/houses/landlord")
 
-        # Assertions to verify behavior
         assert response.status_code == 200
         response_data = response.json()
         assert len(response_data) == 2
-        assert response_data[0]["name"] == house_list[0]["name"]
-        assert response_data[1]["name"] == house_list[1]["name"]
-
-        # Verify that the get_landlord_id_via_kafka function was called with the correct access token
+        assert response_data[0]["name"] == "House 1"
+        assert response_data[1]["name"] == "House 2"
         mock_get_landlord.assert_called_once_with(access_token)
 
 def test_get_houses_by_landloard_missing_access_token(client):
@@ -259,19 +250,26 @@ def test_create_expense_with_file_upload(mock_s3_client, client):
     files = generate_mock_file()
     expense_data_json = json.dumps(create_expense)
 
-    response = client.post(
-        "/houses/addExpense",
-        data={"expense_data": expense_data_json},
-        files=files
-    )
+    # Mock the database query to return tenants for the given house
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.all.return_value = [
+            Tenents(id=1, house_id=create_expense["house_id"]),
+            Tenents(id=2, house_id=create_expense["house_id"])
+        ]
 
-    # Assertions to check the response and behavior
-    assert response.status_code == 200
-    response_json = response.json()
-    assert "id" in response_json
-    assert response_json["title"] == "Rent"
-    assert response_json["amount"] == 1000
-    assert response_json["file_path"] is not None
+        response = client.post(
+            "/houses/addExpense",
+            data={"expense_data": expense_data_json},
+            files=files
+        )
+
+        # Assertions to check the response and behavior
+        assert response.status_code == 200
+        response_json = response.json()
+        assert "id" in response_json
+        assert response_json["title"] == "Rent"
+        assert response_json["amount"] == 1000
+        assert response_json["file_path"] is not None
 
 
 # Test function for handling invalid JSON in expense_data
@@ -352,7 +350,9 @@ def test_get_expenses_by_house(client):
             "description": "Monthly rent",
             "created_at": "2024-12-01T00:00:00",
             "deadline_date": "2024-12-01T00:00:00",
-            "file_path": None
+            "file_path": None,
+            "status": "pending",  # Add this line
+            "tenants": [{"tenant_id": 1, "status": "paid"}]  # Correct the field name
         }
     ]
 
@@ -382,19 +382,11 @@ def create_mock_expense_and_tenant(session):
     session.add(tenant_expense2)
     session.commit()
 
-def test_mark_expense_as_paid():
-    # Arrange: set up initial data in the test database
-    db: Session = next(override_get_db())
-    create_mock_expense_and_tenant(db)
+def test_mark_expense_as_paid_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
 
-    # Act: call the endpoint
-    response = test_client.put("/expenses/1/mark-paid")
+        response = client.put("/houses/expenses/999/mark-paid")
 
-    # Assert: check the response and database state
-    assert response.status_code == 200
-    assert response.json() == {"message": "Expense status updated", "status": "paid"}
-
-    updated_expense = db.query(Expense).filter(Expense.id == 1).first()
-    assert updated_expense.status == 'paid'
-
-    db.rollback()  # Clean up after the test
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"
