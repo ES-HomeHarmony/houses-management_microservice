@@ -52,6 +52,11 @@ class ExpenseCreate(BaseModel):
     deadline_date: Optional[date] = None
     tenant_ids: Optional[List[int]] = None  # IDs of tenants associated with the expense
 
+# Esquema para a criação de um contrato com arquivo
+class ContractCreate(BaseModel):
+    tenant_id: int
+
+
 # Esquema para resposta ao criar uma despesa (Expense)
 class TenantExpenseDetail(BaseModel):
     tenant_id: int
