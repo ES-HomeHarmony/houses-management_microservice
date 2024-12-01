@@ -117,6 +117,8 @@ def get_landlord_id_via_kafka(access_token: str):
             print(f"Found cognito_id for landlord_id {cognito_id_landlord}")
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
+    
+    user_cache.clear()  # Clear the cache after processing
 
     if not cognito_id_landlord:
         raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
@@ -148,6 +150,8 @@ def create_user_in_user_microservice(user_data: dict):
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
 
+    user_cache2.clear()  # Clear the cache after processing
+
     if not cognito_id:
         raise HTTPException(status_code=404, detail="User not found or unauthorized")
 
@@ -171,19 +175,25 @@ def get_tenant_data(tenant_ids: list):
     tenant_data = []
     processed_tenant_ids = set()
 
-    for _ in range(10):  # Retry mechanism with limited attempts
+    for _ in range(5): 
         if tenant_data_dict:
             for tenant_entry in tenant_data_dict:
-                for tenant_id, tenant_name in tenant_entry.items():
+                for tenant_id in tenant_entry.keys():
                     if tenant_id in tenant_ids and tenant_id not in processed_tenant_ids:
-                        tenant_data.append({"tenant_id": tenant_id, "name": tenant_name})
+                        
+                        tenant_name = tenant_entry.get(tenant_id)[0]
+                        tenant_email = tenant_entry.get(tenant_id)[1]
+                        
+                        tenant_data.append({"tenant_id": tenant_id, "name": tenant_name, "email": tenant_email})
+                        
                         processed_tenant_ids.add(tenant_id)  # Mark as processed
-                        print(f"Found tenant data: {tenant_id} - {tenant_name}")
+                        print(f"Found tenant data: {tenant_id}: {tenant_name} - {tenant_email}")
 
         time.sleep(1)  # Add a sleep to avoid busy-waiting
     
     tenant_data_dict.clear()  # Clear the cache after processing
 
+    
     if not tenant_data:
         raise HTTPException(status_code=404, detail="Tenant data not found")
 
@@ -254,6 +264,7 @@ async def create_house(house: HouseCreate, db: Session = Depends(get_db), reques
 @router.post("/tenents", response_model=TenentResponse)
 def create_tenent(tenent: TenentCreate, db: Session = Depends(get_db)):
     
+    print("Creating tenant...")
     print(tenent)
 
     # Create a new user in the user microservice
@@ -309,26 +320,27 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
     if not house:
         raise HTTPException(status_code=404, detail="House not found")
     
-    tenents = db.query(Tenents).filter(Tenents.house_id == house_id).all()
-    if not tenents:
-        return {"house": house, "tenents": []}  # Return an empty tenant list if none found
+    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+    if not tenants:
+        return {"house": house, "tenants": []}  # Return an empty tenant list if none found
 
     # Collect all cognito IDs to request data for tenants
-    list_cognito_ids = [tenent.tenent_id for tenent in tenents]
+    list_cognito_ids = [tenant.tenent_id for tenant in tenants]
 
     # Retrieve tenant data
     tenants_data = get_tenant_data(list_cognito_ids)
 
     # Structure the tenant data for the response
     structured_tenants = []
-    for tenent in tenents:
-        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenent.tenent_id), None)
+    for tenant in tenants:
+        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenant.tenent_id), None)
         if tenant_info:
             structured_tenants.append({
-                "tenant_id": tenent.tenent_id,
+                "tenant_id": tenant.tenent_id,
                 "name": tenant_info["name"],
-                "email": tenant_info.get("email"),
-                "rent": tenent.rent
+                "email": tenant_info["email"],
+                "rent": tenant.rent,
+                "contarct": tenant.contract
             })
 
     # Print structured tenant data for debugging
@@ -354,6 +366,10 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
 
     if file:
         try:
+
+            if " " in file.filename:
+                file.filename = file.filename.replace(" ", "_")
+
             s3_client.upload_fileobj(
                 file.file,
                 os.getenv("S3_BUCKET"),
@@ -364,7 +380,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
             return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
-    
+        
     db_expense = Expense(
         house_id=expense.house_id,
         amount=expense.amount,
@@ -500,7 +516,7 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
         
-    tenant = db.query(Tenents).filter(Tenents.id == contract_create.tenant_id).first()
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == contract_create.tenant_id).first()
 
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")

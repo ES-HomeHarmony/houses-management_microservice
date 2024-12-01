@@ -383,9 +383,10 @@ def test_create_tenant(mocked_kafka_cognito_id, client):
     response_data = {
         "house_id": 1,
         "rent": 1000,
-        "tenent_id": "test-tenant-id",
+        "tenant_id": "test-tenant-id",
         "name": "John Doe",
-        "email": "johndoe@example.com"
+        "email": "johndoe@example.com",
+        "contract": "Test Contract"  # Add a valid string
     }
 
     with patch("app.routes.landlords_routes.create_user_in_user_microservice", return_value="test-tenant-id"):
@@ -697,7 +698,7 @@ def test_uploadContract_succeed(client, mock_s3_client):
         files = {
             "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
         }
-        contract_data = {"tenant_id": 1}
+        contract_data = {"tenant_id": "1"}
 
         response = client.post(
             "/houses/uploadContract",
@@ -772,7 +773,7 @@ def test_uploadContract_filename_with_spaces(client, mock_s3_client):
             files = {
                 "file": ("test file with spaces.pdf", b"Mock file content", "application/pdf"),
             }
-            contract_data = {"tenant_id": 1}
+            contract_data = {"tenant_id": "1"}
 
             response = client.post(
                 "/houses/uploadContract",
@@ -796,7 +797,7 @@ def test_uploadContract_no_credentials_error(client):
         files = {
             "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
         }
-        contract_data = {"tenant_id": 1}
+        contract_data = {"tenant_id": "1"}
 
         response = client.post(
             "/houses/uploadContract",
@@ -818,7 +819,7 @@ def test_uploadContract_generic_exception(client):
         files = {
             "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
         }
-        contract_data = {"tenant_id": 1}
+        contract_data = {"tenant_id": "1"}
 
         response = client.post(
             "/houses/uploadContract",
