@@ -6,7 +6,7 @@ import threading
 import os
 from app.database import get_db
 from app.models import House, Expense, Tenents, TenantExpense
-from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail
+from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail, ContractCreate
 from typing import List
 from datetime import datetime
 import boto3
@@ -14,8 +14,12 @@ from botocore.exceptions import NoCredentialsError
 import os
 from dotenv import load_dotenv
 import json
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import time
+from urllib.parse import urlparse, unquote
+import requests
+import unicodedata
+
 
 
 router = APIRouter(
@@ -117,6 +121,8 @@ def get_landlord_id_via_kafka(access_token: str):
             print(f"Found cognito_id for landlord_id {cognito_id_landlord}")
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
+    
+    user_cache.clear()  # Clear the cache after processing
 
     if not cognito_id_landlord:
         raise HTTPException(status_code=404, detail="Landlord not found or unauthorized")
@@ -148,6 +154,8 @@ def create_user_in_user_microservice(user_data: dict):
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
 
+    user_cache2.clear()  # Clear the cache after processing
+
     if not cognito_id:
         raise HTTPException(status_code=404, detail="User not found or unauthorized")
 
@@ -171,19 +179,25 @@ def get_tenant_data(tenant_ids: list):
     tenant_data = []
     processed_tenant_ids = set()
 
-    for _ in range(10):  # Retry mechanism with limited attempts
+    for _ in range(5): 
         if tenant_data_dict:
             for tenant_entry in tenant_data_dict:
-                for tenant_id, tenant_name in tenant_entry.items():
+                for tenant_id in tenant_entry.keys():
                     if tenant_id in tenant_ids and tenant_id not in processed_tenant_ids:
-                        tenant_data.append({"tenant_id": tenant_id, "name": tenant_name})
+                        
+                        tenant_name = tenant_entry.get(tenant_id)[0]
+                        tenant_email = tenant_entry.get(tenant_id)[1]
+                        
+                        tenant_data.append({"tenant_id": tenant_id, "name": tenant_name, "email": tenant_email})
+                        
                         processed_tenant_ids.add(tenant_id)  # Mark as processed
-                        print(f"Found tenant data: {tenant_id} - {tenant_name}")
+                        print(f"Found tenant data: {tenant_id}: {tenant_name} - {tenant_email}")
 
         time.sleep(1)  # Add a sleep to avoid busy-waiting
     
     tenant_data_dict.clear()  # Clear the cache after processing
 
+    
     if not tenant_data:
         raise HTTPException(status_code=404, detail="Tenant data not found")
 
@@ -254,6 +268,7 @@ async def create_house(house: HouseCreate, db: Session = Depends(get_db), reques
 @router.post("/tenents", response_model=TenentResponse)
 def create_tenent(tenent: TenentCreate, db: Session = Depends(get_db)):
     
+    print("Creating tenant...")
     print(tenent)
 
     # Create a new user in the user microservice
@@ -309,26 +324,27 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
     if not house:
         raise HTTPException(status_code=404, detail="House not found")
     
-    tenents = db.query(Tenents).filter(Tenents.house_id == house_id).all()
-    if not tenents:
-        return {"house": house, "tenents": []}  # Return an empty tenant list if none found
+    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+    if not tenants:
+        return {"house": house, "tenants": []}  # Return an empty tenant list if none found
 
     # Collect all cognito IDs to request data for tenants
-    list_cognito_ids = [tenent.tenent_id for tenent in tenents]
+    list_cognito_ids = [tenant.tenent_id for tenant in tenants]
 
     # Retrieve tenant data
     tenants_data = get_tenant_data(list_cognito_ids)
 
     # Structure the tenant data for the response
     structured_tenants = []
-    for tenent in tenents:
-        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenent.tenent_id), None)
+    for tenant in tenants:
+        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenant.tenent_id), None)
         if tenant_info:
             structured_tenants.append({
-                "tenant_id": tenent.tenent_id,
+                "tenant_id": tenant.tenent_id,
                 "name": tenant_info["name"],
-                "email": tenant_info.get("email"),
-                "rent": tenent.rent
+                "email": tenant_info["email"],
+                "rent": tenant.rent,
+                "contract": tenant.contract
             })
 
     # Print structured tenant data for debugging
@@ -354,6 +370,10 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
 
     if file:
         try:
+
+            if " " in file.filename:
+                file.filename = file.filename.replace(" ", "_")
+
             s3_client.upload_fileobj(
                 file.file,
                 os.getenv("S3_BUCKET"),
@@ -364,7 +384,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
             return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
-    
+        
     db_expense = Expense(
         house_id=expense.house_id,
         amount=expense.amount,
@@ -468,3 +488,85 @@ def mark_expense_as_paid(expense_id: int, db: Session = Depends(get_db)):
         db.refresh(expense)
 
     return {"message": "Expense status updated", "status": expense.status}
+
+@router.post("/uploadContract")
+def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+    file_url = None
+
+    # Parse the JSON string into the ExpenseCreate model
+    try:
+        contract_create = ContractCreate(**json.loads(contract_data))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    
+    if file:
+        try:
+
+            if " " in file.filename:
+                file.filename = file.filename.replace(" ", "_")
+
+            s3_client.upload_fileobj(
+                file.file,
+                os.getenv("S3_BUCKET"),
+                f"contracts/{file.filename}"
+            )
+
+            print(f"File uploaded successfully: {file.filename}")
+
+            file_url = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/contracts/{file.filename}"
+        
+        except NoCredentialsError:
+            return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
+        
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == contract_create.tenant_id).first()
+
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    tenant.contract = file_url
+    db.commit()
+    db.refresh(tenant)
+
+    return {"message": "Contract uploaded successfully", "file_url": file_url}
+
+def normalize_filename(filename: str) -> str:
+    # Remover acentos e caracteres especiais
+    return unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode("ascii")
+
+@router.get("/expenses/{expense_id}/download")
+def download_expense_file(expense_id: int, db: Session = Depends(get_db)):
+    # Obter a despesa do banco de dados
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not expense or not expense.file_path:
+        raise HTTPException(status_code=404, detail="File URL not found in database")
+
+    # Decodificar a URL com caracteres especiais
+    file_url = unquote(expense.file_path)
+    print(f"Downloading file from URL: {file_url}")
+
+    try:
+        # Fazer a requisição HTTP ao S3 para buscar o arquivo
+        response = requests.get(file_url, stream=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to fetch file from S3")
+
+        # Obter o nome do arquivo da URL e normalizar
+        file_name = file_url.split("/")[-1]
+        normalized_file_name = normalize_filename(file_name)
+
+        # Retornar o arquivo como resposta de streaming
+        return StreamingResponse(
+            response.iter_content(chunk_size=1024),  # Envia o conteúdo em chunks
+            media_type="application/pdf",           # Tipo MIME como PDF
+            headers={
+                # O cabeçalho 'inline' permite que o PDF seja exibido no navegador
+                "Content-Disposition": f"inline; filename={normalized_file_name}"
+            },
+        )
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+        

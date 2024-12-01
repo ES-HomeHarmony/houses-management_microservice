@@ -24,6 +24,8 @@ class Tenents(Base):
     house_id = Column(Integer, ForeignKey('houses.id'))  # Relation with the 'houses' table
     rent = Column(Double)
     tenent_id = Column(String(255))  # Relation with the 'users' table (Cognito ID)
+    
+    contract = Column(String(255), nullable=True)
 
     house = relationship("House", back_populates="tenents")
     expenses = relationship("TenantExpense", back_populates="tenant")
