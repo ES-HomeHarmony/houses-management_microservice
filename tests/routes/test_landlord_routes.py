@@ -675,3 +675,158 @@ def test_mark_expense_as_paid_not_found(client):
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Expense not found"
+
+def test_uploadContract_succeed(client, mock_s3_client):
+    # Mock the S3 upload response
+    mock_s3_client.upload_fileobj = MagicMock()
+
+    # Mock the tenant instance
+    tenant = MagicMock(spec=Tenents)
+    tenant.id = 1
+    tenant.house_id = 1
+    tenant.contract = None
+
+    # Mock the database session to return the tenant instance
+    with patch("sqlalchemy.orm.Session.query") as mock_query, patch("sqlalchemy.orm.Session.commit"), patch("sqlalchemy.orm.Session.refresh") as mock_refresh:
+        mock_query.return_value.filter.return_value.first.return_value = tenant
+
+        # Mock the refresh method to simulate the object being persistent
+        mock_refresh.side_effect = lambda obj: setattr(obj, "contract", "mock_updated_contract_url")
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": 1}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to check the response and behavior
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["message"] == "Contract uploaded successfully"
+        assert response_json["file_url"] is not None
+
+def test_uploadContract_tenant_not_found(client):
+    # Mock the database query to return None for the tenant
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": 1}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to check the response and behavior
+        assert response.status_code == 404
+        response_json = response.json()
+        assert response_json["detail"] == "Tenant not found"
+
+def test_uploadContract_invalid_json(client):
+    # Create a mock file upload
+    files = {
+        "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+    }
+
+    # Invalid JSON for contract_data
+    invalid_contract_data = "{tenant_id: 1"  # Missing closing brace and incorrect formatting
+
+    response = client.post(
+        "/houses/uploadContract",
+        data={"contract_data": invalid_contract_data},  # Pass the invalid JSON
+        files=files,
+    )
+
+    # Assertions to check the response and behavior
+    assert response.status_code == 400
+    response_json = response.json()
+    assert response_json["detail"] == "Invalid JSON format"
+
+
+def test_uploadContract_filename_with_spaces(client, mock_s3_client):
+    # Mock the S3 upload response
+    mock_s3_client.upload_fileobj = lambda file, bucket, key: None
+
+    # Create a real `Tenents` instance
+    tenant = Tenents(id=1, house_id=1)
+    tenant.contract = None
+
+    # Mock the database query to return the real tenant instance
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = tenant
+
+        # Mock the commit and refresh methods
+        with patch("sqlalchemy.orm.Session.commit"), patch("sqlalchemy.orm.Session.refresh"):
+            # File with spaces in the name
+            files = {
+                "file": ("test file with spaces.pdf", b"Mock file content", "application/pdf"),
+            }
+            contract_data = {"tenant_id": 1}
+
+            response = client.post(
+                "/houses/uploadContract",
+                data={"contract_data": json.dumps(contract_data)},
+                files=files,
+            )
+
+            # Assertions
+            assert response.status_code == 200
+            response_json = response.json()
+            assert response_json["message"] == "Contract uploaded successfully"
+            # Verify that the filename was modified to replace spaces with underscores
+            assert "test_file_with_spaces.pdf" in response_json["file_url"]
+
+def test_uploadContract_no_credentials_error(client):
+    # Mock the S3 upload to raise NoCredentialsError
+    with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:
+        mock_upload.side_effect = NoCredentialsError
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": 1}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to verify the response
+        assert response.status_code == 400
+        response_json = response.json()
+        assert response_json["error"] == "Credenciais não encontradas"
+
+def test_uploadContract_generic_exception(client):
+    # Mock the S3 upload to raise a generic exception
+    with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:
+        mock_upload.side_effect = Exception("Generic error occurred")
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": 1}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to verify the response
+        assert response.status_code == 400
+        response_json = response.json()
+        assert response_json["error"] == "Generic error occurred"
