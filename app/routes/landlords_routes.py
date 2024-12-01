@@ -320,26 +320,27 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
     if not house:
         raise HTTPException(status_code=404, detail="House not found")
     
-    tenents = db.query(Tenents).filter(Tenents.house_id == house_id).all()
-    if not tenents:
-        return {"house": house, "tenents": []}  # Return an empty tenant list if none found
+    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+    if not tenants:
+        return {"house": house, "tenants": []}  # Return an empty tenant list if none found
 
     # Collect all cognito IDs to request data for tenants
-    list_cognito_ids = [tenent.tenent_id for tenent in tenents]
+    list_cognito_ids = [tenant.tenent_id for tenant in tenants]
 
     # Retrieve tenant data
     tenants_data = get_tenant_data(list_cognito_ids)
 
     # Structure the tenant data for the response
     structured_tenants = []
-    for tenent in tenents:
-        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenent.tenent_id), None)
+    for tenant in tenants:
+        tenant_info = next((data for data in tenants_data if data["tenant_id"] == tenant.tenent_id), None)
         if tenant_info:
             structured_tenants.append({
-                "tenant_id": tenent.tenent_id,
+                "tenant_id": tenant.tenent_id,
                 "name": tenant_info["name"],
                 "email": tenant_info["email"],
-                "rent": tenent.rent
+                "rent": tenant.rent,
+                "contarct": tenant.contract
             })
 
     # Print structured tenant data for debugging
