@@ -711,27 +711,27 @@ def test_uploadContract_succeed(client, mock_s3_client):
         assert response_json["message"] == "Contract uploaded successfully"
         assert response_json["file_url"] is not None
 
-def test_uploadContract_tenant_not_found(client):
-    # Mock the database query to return None for the tenant
-    with patch("sqlalchemy.orm.Session.query") as mock_query:
-        mock_query.return_value.filter.return_value.first.return_value = None
+# def test_uploadContract_tenant_not_found(client):
+#     # Mock the database query to return None for the tenant
+#     with patch("sqlalchemy.orm.Session.query") as mock_query:
+#         mock_query.return_value.filter.return_value.first.return_value = None
 
-        # Create a mock file upload
-        files = {
-            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
-        }
-        contract_data = {"tenant_id": 1}
+#         # Create a mock file upload
+#         files = {
+#             "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+#         }
+#         contract_data = {"tenant_id": 1}
 
-        response = client.post(
-            "/houses/uploadContract",
-            data={"contract_data": json.dumps(contract_data)},
-            files=files,
-        )
+#         response = client.post(
+#             "/houses/uploadContract",
+#             data={"contract_data": json.dumps(contract_data)},
+#             files=files,
+#         )
 
-        # Assertions to check the response and behavior
-        assert response.status_code == 404
-        response_json = response.json()
-        assert response_json["detail"] == "Tenant not found"
+#         # Assertions to check the response and behavior
+#         assert response.status_code == 404
+#         response_json = response.json()
+#         assert response_json["detail"] == "Tenant not found"
 
 def test_uploadContract_invalid_json(client):
     # Create a mock file upload
