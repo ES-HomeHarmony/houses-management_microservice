@@ -14,8 +14,12 @@ from botocore.exceptions import NoCredentialsError
 import os
 from dotenv import load_dotenv
 import json
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import time
+from urllib.parse import urlparse, unquote
+import requests
+import unicodedata
+
 
 
 router = APIRouter(
@@ -340,7 +344,7 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
                 "name": tenant_info["name"],
                 "email": tenant_info["email"],
                 "rent": tenant.rent,
-                "contarct": tenant.contract
+                "contract": tenant.contract
             })
 
     # Print structured tenant data for debugging
@@ -526,3 +530,41 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
     db.refresh(tenant)
 
     return {"message": "Contract uploaded successfully", "file_url": file_url}
+
+def normalize_filename(filename: str) -> str:
+    # Remover acentos e caracteres especiais
+    return unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode("ascii")
+
+@router.get("/expenses/{expense_id}/download")
+def download_expense_file(expense_id: int, db: Session = Depends(get_db)):
+    # Obter a despesa do banco de dados
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not expense or not expense.file_path:
+        raise HTTPException(status_code=404, detail="File URL not found in database")
+
+    # Decodificar a URL com caracteres especiais
+    file_url = unquote(expense.file_path)
+    print(f"Downloading file from URL: {file_url}")
+
+    try:
+        # Fazer a requisição HTTP ao S3 para buscar o arquivo
+        response = requests.get(file_url, stream=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to fetch file from S3")
+
+        # Obter o nome do arquivo da URL e normalizar
+        file_name = file_url.split("/")[-1]
+        normalized_file_name = normalize_filename(file_name)
+
+        # Retornar o arquivo como resposta de streaming
+        return StreamingResponse(
+            response.iter_content(chunk_size=1024),  # Envia o conteúdo em chunks
+            media_type="application/pdf",           # Tipo MIME como PDF
+            headers={
+                # O cabeçalho 'inline' permite que o PDF seja exibido no navegador
+                "Content-Disposition": f"inline; filename={normalized_file_name}"
+            },
+        )
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
