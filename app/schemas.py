@@ -33,6 +33,7 @@ class TenentCreate(BaseModel):
     tenent_id: Optional[str] = None
     name: str
     email: str
+    contract: Optional[UploadFile] = None
 
 # Esquema para resposta ao criar um inquilino
 class TenentResponse(BaseModel):
@@ -40,7 +41,7 @@ class TenentResponse(BaseModel):
     house_id: int
     rent: int
     tenent_id: str
-    contract: str
+    contract: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 # Esquema para a criação de uma expense
