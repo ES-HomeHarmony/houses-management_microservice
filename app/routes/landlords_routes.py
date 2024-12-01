@@ -568,3 +568,5 @@ def download_expense_file(expense_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+        
