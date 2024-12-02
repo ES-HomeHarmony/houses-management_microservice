@@ -102,6 +102,7 @@ def test_create_house_by_landlord_not_found(mocked_cognito_id, client):
 
 @patch("app.routes.landlords_routes.get_landlord_id_via_kafka")
 def test_get_houses_by_landlord(mock_get_landlord, client):
+    
     house_list = [
         House(
             id=1,
@@ -245,19 +246,26 @@ def test_create_expense_with_file_upload(mock_s3_client, client):
     files = generate_mock_file()
     expense_data_json = json.dumps(create_expense)
 
-    response = client.post(
-        "/houses/addExpense",
-        data={"expense_data": expense_data_json},
-        files=files
-    )
+    # Mock the database query to return tenants for the given house
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.all.return_value = [
+            Tenents(id=1, house_id=create_expense["house_id"]),
+            Tenents(id=2, house_id=create_expense["house_id"])
+        ]
 
-    # Assertions to check the response and behavior
-    assert response.status_code == 200
-    response_json = response.json()
-    assert "id" in response_json
-    assert response_json["title"] == "Rent"
-    assert response_json["amount"] == 1000
-    assert response_json["file_path"] is not None
+        response = client.post(
+            "/houses/addExpense",
+            data={"expense_data": expense_data_json},
+            files=files
+        )
+
+        # Assertions to check the response and behavior
+        assert response.status_code == 200
+        response_json = response.json()
+        assert "id" in response_json
+        assert response_json["title"] == "Rent"
+        assert response_json["amount"] == 1000
+        assert response_json["file_path"] is not None
 
 
 # Test function for handling invalid JSON in expense_data
@@ -338,7 +346,9 @@ def test_get_expenses_by_house(client):
             "description": "Monthly rent",
             "created_at": "2024-12-01T00:00:00",
             "deadline_date": "2024-12-01T00:00:00",
-            "file_path": None
+            "file_path": None,
+            "status": "pending",  # Add this line
+            "tenants": [{"tenant_id": 1, "status": "paid"}]  # Correct the field name
         }
     ]
 
@@ -373,9 +383,10 @@ def test_create_tenant(mocked_kafka_cognito_id, client):
     response_data = {
         "house_id": 1,
         "rent": 1000,
-        "tenent_id": "test-tenant-id",
+        "tenant_id": "test-tenant-id",
         "name": "John Doe",
-        "email": "johndoe@example.com"
+        "email": "johndoe@example.com",
+        "contract": "Test Contract"  # Add a valid string
     }
 
     with patch("app.routes.landlords_routes.create_user_in_user_microservice", return_value="test-tenant-id"):
@@ -461,7 +472,6 @@ def test_get_tenants_by_house_with_no_house_found(mocked_kafka_cognito_id, clien
         response_json = response.json()
         assert response_json["detail"] == "House not found"
     
-
 # @patch("app.routes.landlords_routes.producer.send")
 # @patch("app.routes.landlords_routes.user_cache", new_callable=dict)
 # def test_create_user_in_user_microservice_success(mock_user_cache, mock_producer_send):
@@ -532,3 +542,292 @@ def test_create_user_in_user_microservice_timeout(mock_producer_send):
         "action": "create_user",
         "user_data": user_data
     })
+
+
+
+# # Test function for marking tenant payment
+# @patch("sqlalchemy.orm.Session.commit")
+# def test_mark_tenant_payment(mock_commit, client):
+#     # Create a mock tenant expense record
+#     tenant_expense = TenantExpense(tenant_id=1, expense_id=1, status='pending')
+
+#     # Create a mock session
+#     mock_db = MagicMock()
+#     mock_db.query.return_value.filter.return_value.first.return_value = tenant_expense
+
+#     # Patch the `get_db` dependency to return the mock session
+#     with patch("app.routes.landlords_routes.get_db", return_value=mock_db):
+#         # Send a PUT request to mark tenant payment
+#         response = client.put("/tenants/1/pay?expense_id=1")
+
+#         # Assertions
+#         assert response.status_code == 200
+#         response_data = response.json()
+#         assert response_data["message"] == "Tenant payment updated successfully"
+#         mock_commit.assert_called_once()
+
+def test_mark_tenant_payment_not_found(client):
+    # Mock the database query to return None
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+        
+        # Send a PUT request to mark tenant payment
+        response = client.put("/tenants/1/pay?expense_id=1")
+
+        # Assertions
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Not Found"  # Ensure this matches the route's detail
+
+# Test for getting a specific expense by ID
+@patch("sqlalchemy.orm.Session.query")
+def test_get_expense_by_id(mock_query, client):
+    # Create a mock expense record with date fields
+    expense = Expense(
+        id=1,
+        house_id=1,
+        amount=1000.0,
+        title="Rent",
+        description="Monthly rent",
+        created_at=datetime.now().date(),  # Convert to date
+        deadline_date=datetime.now().date(),  # Convert to date
+        file_path=None,
+        status="pending"
+    )
+    mock_query.return_value.filter.return_value.first.return_value = expense
+
+    response = client.get("/houses/expense/1")
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["id"] == expense.id
+    assert response_data["title"] == expense.title
+
+def test_get_expense_by_id_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        response = client.get("/houses/expense/999")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"
+
+# Test for deleting an expense
+@patch("sqlalchemy.orm.Session.commit")
+def test_delete_expense(mock_commit, client):
+    expense = Expense(id=1, house_id=1, amount=1000.0, title="Rent")
+
+    # Mock the session and ensure the delete method does not throw errors
+    with patch("sqlalchemy.orm.Session.query") as mock_query, patch("sqlalchemy.orm.Session.delete") as mock_delete:
+        mock_query.return_value.filter.return_value.first.return_value = expense
+        
+        # Ensure the delete method is mocked to accept the instance without issues
+        mock_delete.return_value = None
+
+        response = client.delete("/houses/expenses/1")
+
+        # Assertions
+        assert response.status_code == 200
+        assert response.json()["message"] == "Expense deleted successfully"
+        mock_commit.assert_called_once()
+        mock_delete.assert_called_once_with(expense)
+
+def test_delete_expense_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        response = client.delete("/houses/expenses/999")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"
+
+# # Test for marking an expense as paid
+# @patch("sqlalchemy.orm.Session.commit")
+# @patch("sqlalchemy.orm.Session.refresh")
+# def test_mark_expense_as_paid(mock_refresh, mock_commit, client):
+#     # Create an expense instance and tenant expense instances
+#     expense = Expense(id=1, house_id=1, amount=1000.0, title="Rent", status="pending")
+#     tenant_expenses = [
+#         TenantExpense(tenant_id=1, expense_id=1, status="paid"),
+#         TenantExpense(tenant_id=2, expense_id=1, status="paid")
+#     ]
+
+#     # Create a mock session and configure return values for query
+#     mock_session = MagicMock()
+#     mock_session.query.return_value.filter.return_value.first.return_value = expense
+#     mock_session.query.return_value.filter.return_value.all.return_value = tenant_expenses
+
+#     # Patch `get_db` to use the mock session
+#     with patch("app.routes.landlords_routes.get_db", return_value=mock_session):
+#         response = client.put("/houses/expenses/1/mark-paid")
+
+#         # Assertions
+#         assert response.status_code == 200
+#         response_data = response.json()
+#         assert response_data["message"] == "Expense status updated"
+#         assert response_data["status"] == "paid"
+#         mock_commit.assert_called_once()
+#         mock_refresh.assert_called_once_with(expense)
+
+def test_mark_expense_as_paid_not_found(client):
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = None
+
+        response = client.put("/houses/expenses/999/mark-paid")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Expense not found"
+
+def test_uploadContract_succeed(client, mock_s3_client):
+    # Mock the S3 upload response
+    mock_s3_client.upload_fileobj = MagicMock()
+
+    # Mock the tenant instance
+    tenant = MagicMock(spec=Tenents)
+    tenant.id = 1
+    tenant.house_id = 1
+    tenant.contract = None
+
+    # Mock the database session to return the tenant instance
+    with patch("sqlalchemy.orm.Session.query") as mock_query, patch("sqlalchemy.orm.Session.commit"), patch("sqlalchemy.orm.Session.refresh") as mock_refresh:
+        mock_query.return_value.filter.return_value.first.return_value = tenant
+
+        # Mock the refresh method to simulate the object being persistent
+        mock_refresh.side_effect = lambda obj: setattr(obj, "contract", "mock_updated_contract_url")
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": "1"}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to check the response and behavior
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["message"] == "Contract uploaded successfully"
+        assert response_json["file_url"] is not None
+
+# def test_uploadContract_tenant_not_found(client):
+#     # Mock the database query to return None for the tenant
+#     with patch("sqlalchemy.orm.Session.query") as mock_query:
+#         mock_query.return_value.filter.return_value.first.return_value = None
+
+#         # Create a mock file upload
+#         files = {
+#             "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+#         }
+#         contract_data = {"tenant_id": 1}
+
+#         response = client.post(
+#             "/houses/uploadContract",
+#             data={"contract_data": json.dumps(contract_data)},
+#             files=files,
+#         )
+
+#         # Assertions to check the response and behavior
+#         assert response.status_code == 404
+#         response_json = response.json()
+#         assert response_json["detail"] == "Tenant not found"
+
+def test_uploadContract_invalid_json(client):
+    # Create a mock file upload
+    files = {
+        "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+    }
+
+    # Invalid JSON for contract_data
+    invalid_contract_data = "{tenant_id: 1"  # Missing closing brace and incorrect formatting
+
+    response = client.post(
+        "/houses/uploadContract",
+        data={"contract_data": invalid_contract_data},  # Pass the invalid JSON
+        files=files,
+    )
+
+    # Assertions to check the response and behavior
+    assert response.status_code == 400
+    response_json = response.json()
+    assert response_json["detail"] == "Invalid JSON format"
+
+
+def test_uploadContract_filename_with_spaces(client, mock_s3_client):
+    # Mock the S3 upload response
+    mock_s3_client.upload_fileobj = lambda file, bucket, key: None
+
+    # Create a real `Tenents` instance
+    tenant = Tenents(id=1, house_id=1)
+    tenant.contract = None
+
+    # Mock the database query to return the real tenant instance
+    with patch("sqlalchemy.orm.Session.query") as mock_query:
+        mock_query.return_value.filter.return_value.first.return_value = tenant
+
+        # Mock the commit and refresh methods
+        with patch("sqlalchemy.orm.Session.commit"), patch("sqlalchemy.orm.Session.refresh"):
+            # File with spaces in the name
+            files = {
+                "file": ("test file with spaces.pdf", b"Mock file content", "application/pdf"),
+            }
+            contract_data = {"tenant_id": "1"}
+
+            response = client.post(
+                "/houses/uploadContract",
+                data={"contract_data": json.dumps(contract_data)},
+                files=files,
+            )
+
+            # Assertions
+            assert response.status_code == 200
+            response_json = response.json()
+            assert response_json["message"] == "Contract uploaded successfully"
+            # Verify that the filename was modified to replace spaces with underscores
+            assert "test_file_with_spaces.pdf" in response_json["file_url"]
+
+def test_uploadContract_no_credentials_error(client):
+    # Mock the S3 upload to raise NoCredentialsError
+    with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:
+        mock_upload.side_effect = NoCredentialsError
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": "1"}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to verify the response
+        assert response.status_code == 400
+        response_json = response.json()
+        assert response_json["error"] == "Credenciais não encontradas"
+
+def test_uploadContract_generic_exception(client):
+    # Mock the S3 upload to raise a generic exception
+    with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:
+        mock_upload.side_effect = Exception("Generic error occurred")
+
+        # Create a mock file upload
+        files = {
+            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+        }
+        contract_data = {"tenant_id": "1"}
+
+        response = client.post(
+            "/houses/uploadContract",
+            data={"contract_data": json.dumps(contract_data)},
+            files=files,
+        )
+
+        # Assertions to verify the response
+        assert response.status_code == 400
+        response_json = response.json()
+        assert response_json["error"] == "Generic error occurred"
