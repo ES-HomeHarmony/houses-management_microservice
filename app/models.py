@@ -57,3 +57,17 @@ class TenantExpense(Base):
 
     tenant = relationship("Tenents", back_populates="expenses")
     expense = relationship("Expense", back_populates="tenants")
+
+class Issue(Base):
+    __tablename__ = 'issues'
+
+    id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)  # Relation with the 'houses' table
+    tenant_id = Column(Integer, ForeignKey('tenents.id'), nullable=True)  # Relation with the 'tenant_expense' table
+    title = Column(String(255), nullable=False)
+    description = Column(String(255), nullable=True)
+    created_at = Column(Date, default=datetime.date.today)
+    status = Column(String(255), default='pending')  # Status of the issue
+
+    house = relationship("House")
+    tenant = relationship("Tenents")
