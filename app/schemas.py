@@ -75,3 +75,30 @@ class ExpenseResponse(BaseModel):
     tenants: List[TenantExpenseDetail]  # List of tenants associated with the expense, including their statuses
 
     model_config = ConfigDict(from_attributes=True)
+
+# Esquema para a criação de um issue
+class IssueCreate(BaseModel):
+    house_id: int
+    title: str
+    description: str
+    status: Optional[str] = "pending"
+    priority: Optional[str] = "low"
+
+# Esquema para a edição de um issue
+class IssueEdit(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+
+# Esquema para a resposta ao criar um issue
+class IssueResponse(BaseModel):
+    id: int
+    house_id: int
+    tenant_id: Optional[int] = None
+    title: str
+    description: str
+    created_at: date
+    status: str
+
+    model_config = ConfigDict(from_attributes=True)
