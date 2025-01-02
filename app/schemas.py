@@ -89,6 +89,7 @@ class IssueEdit(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    priority: Optional[str] = None
 
 # Esquema para a resposta ao criar um issue
 class IssueResponse(BaseModel):

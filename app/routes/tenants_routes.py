@@ -9,7 +9,6 @@ import os
 import time
 from app.services.kafka import user_cache, producer
 
-
 router = APIRouter(
     prefix="/tenants",
     tags=["tenants"],
@@ -96,17 +95,22 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    issue = db.query(Issue).filter(Issue.id == issue.id).first()
-    if not issue:
+    existing_issue = db.query(Issue).filter(Issue.id == issue.id).first()
+    if not existing_issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     
-    if issue.tenant_id != tenant.id:
+    if existing_issue.tenant_id != tenant.id:
         raise HTTPException(status_code=403, detail="Forbidden")
     
-    issue.title = issue.title if issue.title else issue.title
-    issue.description = issue.description if issue.description else issue.description
-    issue.status = issue.status if issue.status else issue.status
-    issue.priority = issue.priority if issue.priority else issue.priority
+    # Update fields only if new values are provided
+    if issue.title:
+        existing_issue.title = issue.title
+    if issue.description:
+        existing_issue.description = issue.description
+    if issue.status:
+        existing_issue.status = issue.status
+    if issue.priority:
+        existing_issue.priority = issue.priority
 
     db.commit()
     db.refresh(issue)

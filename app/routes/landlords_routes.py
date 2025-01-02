@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request
 from sqlalchemy.orm import Session
-from kafka import KafkaConsumer, KafkaProducer
 import json
-import threading
 import os
 from app.database import get_db
 from app.models import House, Expense, Tenents, TenantExpense
@@ -16,7 +14,7 @@ from dotenv import load_dotenv
 import json
 from fastapi.responses import JSONResponse, StreamingResponse
 import time
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote
 import requests
 import unicodedata
 from app.services.kafka import user_cache, user_cache2, tenant_data_dict, producer, consumer, user_creation_consumer, tenant_get_info_consumer
@@ -421,6 +419,9 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 @router.put("/expenses/{expense_id}/mark-paid")
 def mark_expense_as_paid(expense_id: int, db: Session = Depends(get_db)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    
+    print(expense.__dict__)
+    
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 
