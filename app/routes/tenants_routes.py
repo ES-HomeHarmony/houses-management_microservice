@@ -137,7 +137,9 @@ def get_issues_by_house(house_id: int, db: Session = Depends(get_db)):
     issues = db.query(Issue).filter(Issue.house_id == house_id).all()
     if not issues:
         raise HTTPException(status_code=404, detail=f"Issues not found for house {house_id}")
-    return issues
+    
+    # Converter explicitamente para o esquema Pydantic
+    return [IssueResponse.model_validate(issue) for issue in issues]
 
 @router.get("/issues/{issue_id}", response_model=IssueResponse)
 def get_issue_by_id(issue_id: int, db: Session = Depends(get_db)):
