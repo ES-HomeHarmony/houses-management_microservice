@@ -138,6 +138,7 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
     issue.title = issue.title if issue.title else issue.title
     issue.description = issue.description if issue.description else issue.description
     issue.status = issue.status if issue.status else issue.status
+    issue.priority = issue.priority if issue.priority else issue.priority
 
     db.commit()
     db.refresh(issue)
