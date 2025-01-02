@@ -131,3 +131,41 @@ def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None)
         raise HTTPException(status_code=404, detail="No houses found for the tenant")
 
     return houses
+
+@router.get("/houses/{house_id}/issues", response_model=List[IssueResponse])
+def get_issues_by_house(house_id: int, db: Session = Depends(get_db)):
+    issues = db.query(Issue).filter(Issue.house_id == house_id).all()
+    if not issues:
+        raise HTTPException(status_code=404, detail=f"Issues not found for house {house_id}")
+    
+    # Converter explicitamente para o esquema Pydantic
+    return [IssueResponse.model_validate(issue) for issue in issues]
+
+@router.get("/issues/{issue_id}", response_model=IssueResponse)
+def get_issue_by_id(issue_id: int, db: Session = Depends(get_db)):
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    return issue
+
+@router.get("/landlords/{landlord_id}/issues", response_model=List[IssueResponse])
+def get_issues_by_landlord(landlord_id: str, db: Session = Depends(get_db)):
+    houses = db.query(House).filter(House.landlord_id == landlord_id).all()
+    if not houses:
+        raise HTTPException(status_code=404, detail=f"No houses found for landlord {landlord_id}")
+    
+    house_ids = [house.id for house in houses]
+    issues = db.query(Issue).filter(Issue.house_id.in_(house_ids)).all()
+    if not issues:
+        raise HTTPException(status_code=404, detail=f"No issues found for landlord {landlord_id}")
+    return issues
+
+@router.delete("/issues/{issue_id}")
+def delete_issue(issue_id: int, db: Session = Depends(get_db)):
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    
+    db.delete(issue)
+    db.commit()
+    return {"message": "Issue deleted successfully"}
