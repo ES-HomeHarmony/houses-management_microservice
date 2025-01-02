@@ -400,7 +400,6 @@ def test_get_houses_by_tenant_no_houses(mock_query, mock_get_tenant_id, client_w
     assert response.json()["detail"] == "No houses found for the tenant"
     mock_get_tenant_id.assert_called_once_with(MOCK_ACCESS_TOKEN)
 
-# DÁ ERRO
 @patch("sqlalchemy.orm.Session.query")
 def test_get_issues_by_house(mock_query, client_with_access_token):
     """Test retrieving issues by house ID."""
