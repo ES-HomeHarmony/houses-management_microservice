@@ -81,7 +81,6 @@ def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Req
 
 @router.put("/updateIssue", response_model=IssueResponse)
 def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Request = None):
-    
     # Extract access_token from cookies
     access_token = request.cookies.get("access_token")
     if not access_token:
@@ -113,5 +112,5 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
         existing_issue.priority = issue.priority
 
     db.commit()
-    db.refresh(issue)
-    return issue
+    db.refresh(existing_issue)
+    return existing_issue

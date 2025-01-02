@@ -86,6 +86,7 @@ class IssueCreate(BaseModel):
 
 # Esquema para a edição de um issue
 class IssueEdit(BaseModel):
+    id: int
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
@@ -100,5 +101,6 @@ class IssueResponse(BaseModel):
     description: str
     created_at: date
     status: str
+    priority: str
 
     model_config = ConfigDict(from_attributes=True)
