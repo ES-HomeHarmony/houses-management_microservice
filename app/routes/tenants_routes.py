@@ -6,10 +6,8 @@ from app.database import get_db
 from app.models import Tenents, Issue
 from app.schemas import IssueCreate, IssueResponse, IssueEdit
 import os
-from dotenv import load_dotenv
-import json
-import threading
 import time
+from app.services.kafka import user_cache, producer
 
 
 router = APIRouter(
@@ -17,36 +15,6 @@ router = APIRouter(
     tags=["tenants"],
 )
 
-env = os.getenv('ENV', 'development')
-env_file = f'.env/{env}.env'
-
-if os.path.exists(env_file):
-    load_dotenv(dotenv_path=env_file)
-
-
-producer = KafkaProducer(
-    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
-    value_serializer=lambda v: json.dumps(v).encode('utf-8')
-)
-
-# Kafka consumer for receiving responses
-consumer = KafkaConsumer(
-    'user-validation-response',
-    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
-    auto_offset_reset='earliest',
-    group_id='houses_group',
-    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-)
-
-tenant_id_cache = {}
-
-def start_tenantId_consumer():
-    for message in consumer:
-        print(message.value)
-        tenant_id_cache["cognito_id"] = message.value.get("cognito_id")
-
-
-threading.Thread(target=start_tenantId_consumer).start()
 
 def get_tenant_id_via_kafka(access_token: str):
 
@@ -66,15 +34,15 @@ def get_tenant_id_via_kafka(access_token: str):
 
     for _ in range(10):
         
-        print(f"Checking for tenant_id in cache: {tenant_id_cache}")
-        if "cognito_id" in tenant_id_cache.keys():
-            cognito_id_tenant = tenant_id_cache.get("cognito_id")
+        print(f"Checking for tenant_id in cache: {user_cache}")
+        if "cognito_id" in user_cache.keys():
+            cognito_id_tenant = user_cache.get("cognito_id")
             print(f"Tenant ID: {cognito_id_tenant}")
             break
         
         time.sleep(1)
     
-    tenant_id_cache.clear()
+    user_cache.clear()
 
     if not cognito_id_tenant:
         raise HTTPException(status_code=401, detail="Unauthorized")
