@@ -420,8 +420,6 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 def mark_expense_as_paid(expense_id: int, db: Session = Depends(get_db)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     
-    print(expense.__dict__)
-    
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 
