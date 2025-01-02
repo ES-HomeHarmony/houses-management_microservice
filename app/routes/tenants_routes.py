@@ -103,7 +103,8 @@ def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Req
         tenant_id=tenant.id,
         title=issue.title,
         description=issue.description,
-        status=issue.status
+        status=issue.status,
+        priority=issue.priority
     )
     
     db.add(new_issue)

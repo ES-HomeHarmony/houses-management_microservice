@@ -81,7 +81,8 @@ class IssueCreate(BaseModel):
     house_id: int
     title: str
     description: str
-    status: Optional[str] = None
+    status: Optional[str] = "pending"
+    priority: Optional[str] = "low"
 
 # Esquema para a edição de um issue
 class IssueEdit(BaseModel):

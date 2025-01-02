@@ -68,6 +68,7 @@ class Issue(Base):
     description = Column(String(255), nullable=True)
     created_at = Column(Date, default=datetime.date.today)
     status = Column(String(255), default='pending')  # Status of the issue
+    priority = Column(String(255), default='low')  # Priority of
 
     house = relationship("House")
     tenant = relationship("Tenents")
