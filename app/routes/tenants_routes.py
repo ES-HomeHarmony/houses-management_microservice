@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from kafka import KafkaProducer, KafkaConsumer
 import os
 from app.database import get_db
-from app.models import Tenents, Issue
-from app.schemas import IssueCreate, IssueResponse, IssueEdit
-import os
-import time
 from app.services.kafka import user_cache, producer
+from app.models import House, Expense, Tenents, TenantExpense
+from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail, ContractCreate
+from typing import List
+from dotenv import load_dotenv
+import json
+import threading
+import time
 
 router = APIRouter(
     prefix="/tenants",
@@ -114,3 +116,22 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
     db.commit()
     db.refresh(existing_issue)
     return existing_issue
+  
+# Endpoint to get houses by tenant
+@router.get("/houses", response_model=List[HouseResponse])
+def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None):
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+
+    tenant_id = get_tenant_id_via_kafka(access_token)
+
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    houses = db.query(House).filter(House.id == tenant.house_id).all()
+    if not houses:
+        raise HTTPException(status_code=404, detail="No houses found for the tenant")
+
+    return houses
