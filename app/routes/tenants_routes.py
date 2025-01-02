@@ -1,14 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-import os
 from app.database import get_db
 from app.services.kafka import user_cache, producer
-from app.models import House, Expense, Tenents, TenantExpense
-from app.schemas import HouseCreate, HouseResponse, ExpenseCreate, ExpenseResponse, TenentCreate, TenentResponse, TenantExpenseDetail, ContractCreate
+from app.models import House, Tenents, Issue
+from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit
 from typing import List
-from dotenv import load_dotenv
-import json
-import threading
 import time
 
 router = APIRouter(
