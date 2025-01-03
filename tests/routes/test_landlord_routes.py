@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 from app.models import Expense, House, Tenents
 from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from botocore.exceptions import NoCredentialsError
 from datetime import datetime
 import json
@@ -529,7 +529,9 @@ def test_create_user_in_user_microservice_timeout(mock_producer_send):
     }
 
     # Mock the Kafka producer's `send` method
-    mock_producer_send.return_value = MagicMock()
+    # Mock do método `send`
+    mock_future = MagicMock()
+    mock_producer_send.return_value = mock_future
     mock_producer_send.return_value.get.return_value = None  # Simulate successful send
 
     with pytest.raises(HTTPException) as exc_info:
@@ -538,11 +540,19 @@ def test_create_user_in_user_microservice_timeout(mock_producer_send):
     # Assertions
     assert exc_info.value.status_code == 404
     assert str(exc_info.value.detail) == "User not found or unauthorized"
-    mock_producer_send.assert_called_once_with('user-creation-request', {
-        "action": "create_user",
-        "user_data": user_data
-    })
 
+    # Verificar chamadas relevantes
+    from unittest.mock import call
+    expected_calls = [
+        call('user-creation-request', {"action": "create_user", "user_data": user_data}),
+        call('invite-request', {"action": "create_user", "user_data": user_data}),
+    ]
+
+    # Filtrar chamadas relevantes (removendo call().get(timeout=10))
+    relevant_calls = [call for call in mock_producer_send.mock_calls if 'get' not in str(call)]
+
+    # Validar apenas as chamadas relevantes
+    assert relevant_calls == expected_calls
 
 
 # # Test function for marking tenant payment
