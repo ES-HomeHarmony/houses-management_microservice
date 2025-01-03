@@ -80,6 +80,7 @@ def create_user_in_user_microservice(user_data: dict):
     }
     
     try:
+        producer.send('invite-request', user_creation_request)
         future = producer.send('user-creation-request', user_creation_request)
         result = future.get(timeout=10)  # Block until the send is acknowledged or times out
         print(f"Message sent successfully: {result}")
