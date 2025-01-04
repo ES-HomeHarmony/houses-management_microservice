@@ -46,6 +46,16 @@ def get_tenant_id_via_kafka(access_token: str):
     
     return cognito_id_tenant
 
+def tenant_update_id(old_id, new_id, db: Session):
+
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == old_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    tenant.tenent_id = new_id
+    db.commit()
+    db.refresh(tenant)
+    return
 
 @router.post("/createIssue", response_model=IssueResponse)
 def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Request = None):
