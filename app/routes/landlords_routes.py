@@ -474,17 +474,6 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
     db.commit()
     db.refresh(tenant)
 
-    tenant_data = [contract_create.tenant_id]
-    tenants_data = get_tenant_data(tenant_data)
-    message = {
-        "action": "upload_contract",
-        "user_data": {
-        "email": tenants_data[0]["email"],
-        "name": tenants_data[0]["name"]
-        }
-    }
-    producer.send('invite-request', message)
-
     return {"message": "Contract uploaded successfully", "file_url": file_url}
 
 def normalize_filename(filename: str) -> str:
