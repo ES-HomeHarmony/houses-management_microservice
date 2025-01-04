@@ -687,40 +687,52 @@ def test_mark_expense_as_paid_not_found(client):
         assert response.status_code == 404
         assert response.json()["detail"] == "Expense not found"
 
-def test_uploadContract_succeed(client, mock_s3_client):
-    # Mock the S3 upload response
+@patch("app.routes.landlords_routes.get_tenant_data")
+@patch("app.routes.landlords_routes.producer.send")
+@patch("app.routes.landlords_routes.s3_client")
+def test_uploadContract_succeed(mock_s3_client, mock_producer_send, mock_get_tenant_data, db_session, client):
+    # Mock do S3
     mock_s3_client.upload_fileobj = MagicMock()
 
-    # Mock the tenant instance
-    tenant = MagicMock(spec=Tenents)
-    tenant.id = 1
-    tenant.house_id = 1
-    tenant.contract = None
+    # Criar tenant na sessão de teste
+    tenant = Tenents(id=1, house_id=1, tenent_id="1", contract=None)
+    db_session.add(tenant)
+    db_session.commit()
 
-    # Mock the database session to return the tenant instance
-    with patch("sqlalchemy.orm.Session.query") as mock_query, patch("sqlalchemy.orm.Session.commit"), patch("sqlalchemy.orm.Session.refresh") as mock_refresh:
-        mock_query.return_value.filter.return_value.first.return_value = tenant
+    # Mock de get_tenant_data
+    mock_get_tenant_data.return_value = [{"email": "test@example.com", "name": "John Doe"}]
 
-        # Mock the refresh method to simulate the object being persistent
-        mock_refresh.side_effect = lambda obj: setattr(obj, "contract", "mock_updated_contract_url")
+    # Mock do producer.send
+    mock_producer_send.return_value = MagicMock()
 
-        # Create a mock file upload
-        files = {
-            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
+    # Dados para a requisição
+    files = {"file": ("test_file.pdf", b"Mock file content", "application/pdf")}
+    contract_data = {"tenant_id": "1"}
+
+    response = client.post(
+        "/houses/uploadContract",
+        data={"contract_data": json.dumps(contract_data)},
+        files=files,
+    )
+
+    # Verificações
+    assert response.status_code == 200
+    response_json = response.json()
+    assert response_json["message"] == "Contract uploaded successfully"
+    assert response_json["file_url"] is not None
+
+    # Verificar chamadas
+    mock_get_tenant_data.assert_called_once_with(["1"])
+    mock_producer_send.assert_called_once_with(
+        "invite-request",
+        {
+            "action": "upload_contract",
+            "user_data": {
+                "email": "test@example.com",
+                "name": "John Doe"
+            }
         }
-        contract_data = {"tenant_id": "1"}
-
-        response = client.post(
-            "/houses/uploadContract",
-            data={"contract_data": json.dumps(contract_data)},
-            files=files,
-        )
-
-        # Assertions to check the response and behavior
-        assert response.status_code == 200
-        response_json = response.json()
-        assert response_json["message"] == "Contract uploaded successfully"
-        assert response_json["file_url"] is not None
+    )
 
 # def test_uploadContract_tenant_not_found(client):
 #     # Mock the database query to return None for the tenant
@@ -798,27 +810,42 @@ def test_uploadContract_filename_with_spaces(client, mock_s3_client):
             # Verify that the filename was modified to replace spaces with underscores
             assert "test_file_with_spaces.pdf" in response_json["file_url"]
 
-def test_uploadContract_no_credentials_error(client):
-    # Mock the S3 upload to raise NoCredentialsError
-    with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:
-        mock_upload.side_effect = NoCredentialsError
+@patch("app.routes.landlords_routes.get_tenant_data")
+@patch("app.routes.landlords_routes.s3_client")
+def test_uploadContract_filename_with_spaces(mock_s3_client, mock_get_tenant_data, db_session, client):
+    # Mock do S3 para aceitar upload sem erros
+    mock_s3_client.upload_fileobj = MagicMock()
 
-        # Create a mock file upload
-        files = {
-            "file": ("test_file.pdf", b"Mock file content", "application/pdf"),
-        }
-        contract_data = {"tenant_id": "1"}
+    # Configurar mock para get_tenant_data
+    mock_get_tenant_data.return_value = [{"email": "test@example.com", "name": "John Doe"}]
 
-        response = client.post(
-            "/houses/uploadContract",
-            data={"contract_data": json.dumps(contract_data)},
-            files=files,
-        )
+    # Criar tenant no banco de dados
+    tenant = Tenents(id=1, house_id=1, tenent_id="1", contract=None)
+    db_session.add(tenant)
+    db_session.commit()
 
-        # Assertions to verify the response
-        assert response.status_code == 400
-        response_json = response.json()
-        assert response_json["error"] == "Credenciais não encontradas"
+    # Dados do arquivo
+    files = {
+        "file": ("test file with spaces.pdf", b"Mock file content", "application/pdf"),
+    }
+    contract_data = {"tenant_id": "1"}
+
+    # Enviar requisição POST
+    response = client.post(
+        "/houses/uploadContract",
+        data={"contract_data": json.dumps(contract_data)},
+        files=files,
+    )
+
+    # Verificações
+    assert response.status_code == 200
+    response_json = response.json()
+    assert response_json["message"] == "Contract uploaded successfully"
+    assert "test_file_with_spaces.pdf" in response_json["file_url"]
+
+    # Verificar chamadas
+    mock_get_tenant_data.assert_called_once_with(["1"])
+    mock_s3_client.upload_fileobj.assert_called_once()
 
 def test_uploadContract_generic_exception(client):
     # Mock the S3 upload to raise a generic exception
