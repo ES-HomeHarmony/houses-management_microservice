@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request
 from sqlalchemy.orm import Session
-from kafka import KafkaConsumer, KafkaProducer
 import json
-import threading
 import os
 from app.database import get_db
 from app.models import House, Expense, Tenents, TenantExpense
@@ -16,10 +14,10 @@ from dotenv import load_dotenv
 import json
 from fastapi.responses import JSONResponse, StreamingResponse
 import time
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote
 import requests
 import unicodedata
-
+from app.services.kafka import user_cache, user_cache2, tenant_data_dict, producer, consumer, user_creation_consumer, tenant_get_info_consumer
 
 
 router = APIRouter(
@@ -41,61 +39,6 @@ s3_client = boto3.client(
     aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
     aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
 )
-
-producer = KafkaProducer(
-    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
-    value_serializer=lambda v: json.dumps(v).encode('utf-8')
-)
-
-# Kafka consumer for receiving responses
-consumer = KafkaConsumer(
-    'user-validation-response',
-    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
-    auto_offset_reset='earliest',
-    group_id='houses_group',
-    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-)
-
-# Kafka consumer for user creation responses
-user_creation_consumer = KafkaConsumer(
-    'user-creation-response',
-    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
-    auto_offset_reset='earliest',
-    group_id='user_creation_group',
-    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-)
-
-# Kafka consumer for tenant info responses
-tenant_get_info_consumer = KafkaConsumer(
-    'tenant_info_response',
-    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
-    auto_offset_reset='earliest',
-    group_id='tenant_info_group',
-    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-)
-
-print("Kafka consumer initialized and listening...")
-print(f"Subscribed topics: {consumer.subscription()}")
-print(f"KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
-
-user_cache = {}
-user_cache2 = {}
-tenant_data_dict = []
-
-# Run the consumer in a separate thread to listen for responses
-def start_consumer():
-    for message in consumer:
-        user_cache["cognito_id"] = message.value.get("cognito_id")
-def start_consumer_2():
-    for message in user_creation_consumer:
-        user_cache2["cognito_id"] = message.value.get("cognito_id")
-def start_consumer_3():
-    for message in tenant_get_info_consumer:
-        tenant_data_dict.append(message.value)
-
-threading.Thread(target=start_consumer, daemon=True).start()
-threading.Thread(target=start_consumer_2, daemon=True).start()
-threading.Thread(target=start_consumer_3, daemon=True).start()
 
 def get_landlord_id_via_kafka(access_token: str):
     # Send a message to Kafka for user validation
@@ -140,6 +83,7 @@ def create_user_in_user_microservice(user_data: dict):
         future = producer.send('user-creation-request', user_creation_request)
         result = future.get(timeout=10)  # Block until the send is acknowledged or times out
         print(f"Message sent successfully: {result}")
+        producer.send('invite-request', user_creation_request)
     except Exception as e:
         print(f"Error sending message to Kafka: {e}")
 
@@ -476,6 +420,7 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 @router.put("/expenses/{expense_id}/mark-paid")
 def mark_expense_as_paid(expense_id: int, db: Session = Depends(get_db)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
+    
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 

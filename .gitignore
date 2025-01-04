@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 
+# Ignorar arquivos de banco de dados
+test_tasks.db
+
 # Ignorar configurações de IDEs
 .vscode/
 .idea/
