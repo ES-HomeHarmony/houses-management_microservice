@@ -83,21 +83,10 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
     access_token = request.cookies.get("access_token")
     if not access_token:
         raise HTTPException(status_code=401, detail="Access token missing")
-    
-    # Get tenant_id from access_token
-    tenant_id = get_tenant_id_via_kafka(access_token)
-
-    # Get Tenant
-    tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
+       
     existing_issue = db.query(Issue).filter(Issue.id == issue.id).first()
     if not existing_issue:
         raise HTTPException(status_code=404, detail="Issue not found")
-    
-    if existing_issue.tenant_id != tenant.id:
-        raise HTTPException(status_code=403, detail="Forbidden")
     
     # Update fields only if new values are provided
     if issue.title:
@@ -122,11 +111,16 @@ def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None)
 
     tenant_id = get_tenant_id_via_kafka(access_token)
 
-    tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
-    if not tenant:
+    tenants = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).all()
+    
+    if not tenants:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    houses = []
 
-    houses = db.query(House).filter(House.id == tenant.house_id).all()
+    for tenant in tenants:
+        houses += db.query(House).filter(House.id == tenant.house_id).all()
+
     if not houses:
         raise HTTPException(status_code=404, detail="No houses found for the tenant")
 
@@ -136,7 +130,7 @@ def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None)
 def get_issues_by_house(house_id: int, db: Session = Depends(get_db)):
     issues = db.query(Issue).filter(Issue.house_id == house_id).all()
     if not issues:
-        raise HTTPException(status_code=404, detail=f"Issues not found for house {house_id}")
+        return []
     
     # Converter explicitamente para o esquema Pydantic
     return [IssueResponse.model_validate(issue) for issue in issues]
