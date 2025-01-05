@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 from unittest.mock import patch, MagicMock
 from app.models import House, Tenents, Issue
-from app.routes.tenants_routes import get_tenant_id_via_kafka
+from app.routes.tenants_routes import get_tenant_id_via_kafka, tenant_update_id
 from app.schemas import IssueResponse
 from datetime import date
 
@@ -111,6 +111,39 @@ def test_get_tenant_id_via_kafka_producer_exception():
             get_tenant_id_via_kafka("mock_access_token")
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == "Unauthorized"
+
+def test_tenant_update_id_success(mock_db_session):
+    """Test successful tenant ID update."""
+    # Mock tenant instance
+    mock_tenant = Tenents(
+        id=1,
+        tenent_id="old-tenant-id",
+        house_id=1,
+        rent=1000.00,
+        contract="test-contract",
+    )
+    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_tenant
+
+    # Call the function
+    tenant_update_id("old-tenant-id", "new-tenant-id", mock_db_session)
+
+    # Assertions
+    assert mock_tenant.tenent_id == "new-tenant-id"
+    mock_db_session.commit.assert_called_once()
+    mock_db_session.refresh.assert_called_once_with(mock_tenant)
+
+def test_tenant_update_id_not_found(mock_db_session):
+    """Test tenant update with non-existing tenant."""
+    mock_db_session.query.return_value.filter.return_value.first.return_value = None
+
+    # Call the function and expect an exception
+    with pytest.raises(HTTPException) as exc_info:
+        tenant_update_id("non-existing-id", "new-tenant-id", mock_db_session)
+
+    # Assertions
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Tenant not found"
+    mock_db_session.commit.assert_not_called()
 
 # Test createIssue endpoint
 def test_create_issue(client_with_access_token, db_session):
