@@ -1,4 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+import requests
+from fastapi.responses import StreamingResponse
+from app.routes.landlords_routes import normalize_filename
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.kafka import user_cache, producer
@@ -6,6 +9,7 @@ from app.models import House, Tenents, Issue
 from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit
 from typing import List
 import time
+from urllib.parse import unquote
 
 router = APIRouter(
     prefix="/tenants",
@@ -174,3 +178,42 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db)):
     db.delete(issue)
     db.commit()
     return {"message": "Issue deleted successfully"}
+
+@router.get("/downloadContract")
+def download_expense_file(db: Session = Depends(get_db), request: Request = None):
+    
+    access_token = request.cookies.get("access_token")
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+    
+    tenant_id = get_tenant_id_via_kafka(access_token)
+
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
+
+    # Decodificar a URL com caracteres especiais
+    file_url = unquote(tenant.contract)
+    print(f"Downloading file from URL: {file_url}")
+
+    try:
+        # Fazer a requisição HTTP ao S3 para buscar o arquivo
+        response = requests.get(file_url, stream=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to fetch file from S3")
+
+        # Obter o nome do arquivo da URL e normalizar
+        file_name = file_url.split("/")[-1]
+        normalized_file_name = normalize_filename(file_name)
+
+        # Retornar o arquivo como resposta de streaming
+        return StreamingResponse(
+            response.iter_content(chunk_size=1024),  # Envia o conteúdo em chunks
+            media_type="application/pdf",           # Tipo MIME como PDF
+            headers={
+                # O cabeçalho 'inline' permite que o PDF seja exibido no navegador
+                "Content-Disposition": f"inline; filename={normalized_file_name}"
+            },
+        )
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
