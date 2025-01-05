@@ -238,35 +238,56 @@ def test_get_landlord_id_via_kafka_send_error(mock_send):
     })
 
 # Test function for expense creation with file upload
-def test_create_expense_with_file_upload(mock_s3_client, client):
-    # Mock the S3 upload response
-    mock_s3_client.upload_fileobj.return_value = "https://test-bucket.s3.us-east-1.amazonaws.com/expenses/test_file.pdf"
+@patch("app.routes.landlords_routes.get_tenant_data")
+@patch("app.routes.landlords_routes.producer.send")
+@patch("app.routes.landlords_routes.s3_client")
+def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, mock_get_tenant_data, client, db_session):
+    # Mock S3 upload response
+    mock_s3_client.upload_fileobj = MagicMock()
 
-    # Create a mock file upload
+    # Mock tenant data response
+    mock_get_tenant_data.return_value = [{"email": "tenant1@example.com", "name": "Tenant One"}]
+
+    # Create tenants in the database
+    tenant1 = Tenents(id=1, house_id=create_expense["house_id"], tenent_id="1")
+    tenant2 = Tenents(id=2, house_id=create_expense["house_id"], tenent_id="2")
+    db_session.add_all([tenant1, tenant2])
+    db_session.commit()
+
+    # Mock file upload
     files = generate_mock_file()
     expense_data_json = json.dumps(create_expense)
 
-    # Mock the database query to return tenants for the given house
-    with patch("sqlalchemy.orm.Session.query") as mock_query:
-        mock_query.return_value.filter.return_value.all.return_value = [
-            Tenents(id=1, house_id=create_expense["house_id"]),
-            Tenents(id=2, house_id=create_expense["house_id"])
-        ]
+    # Send POST request
+    response = client.post(
+        "/houses/addExpense",
+        data={"expense_data": expense_data_json},
+        files=files,
+    )
 
-        response = client.post(
-            "/houses/addExpense",
-            data={"expense_data": expense_data_json},
-            files=files
-        )
+    # Assertions to check the response and behavior
+    assert response.status_code == 200
+    response_json = response.json()
+    assert "id" in response_json
+    assert response_json["title"] == create_expense["title"]
+    assert response_json["amount"] == create_expense["amount"]
+    assert response_json["file_path"] is not None
 
-        # Assertions to check the response and behavior
-        assert response.status_code == 200
-        response_json = response.json()
-        assert "id" in response_json
-        assert response_json["title"] == "Rent"
-        assert response_json["amount"] == 1000
-        assert response_json["file_path"] is not None
+    # Verify that Kafka producer was called
+    mock_producer_send.assert_called_once()
+    kafka_message = mock_producer_send.call_args[0][1]
 
+    # Assertions for Kafka message
+    assert kafka_message["action"] == "expense_created"
+    assert kafka_message["user_data"]["expense_details"]["title"] == create_expense["title"]
+    assert kafka_message["user_data"]["expense_details"]["amount"] == create_expense["amount"]
+    assert kafka_message["user_data"]["expense_details"]["deadline_date"] == create_expense["deadline_date"]
+
+    # Assertions for tenant data in Kafka message
+    users = kafka_message["user_data"]["users"]
+    assert len(users) == 2
+    assert users[0]["email"] == "tenant1@example.com"
+    assert users[0]["name"] == "Tenant One"
 
 # Test function for handling invalid JSON in expense_data
 def test_create_expense_with_invalid_json(client):
