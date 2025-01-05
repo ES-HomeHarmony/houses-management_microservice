@@ -166,14 +166,26 @@ def update_expense_status_if_paid(expense_id: int, db: Session):
         else:
             raise HTTPException(status_code=404, detail="Expense not found")
         
-def create_tenant_expenses(expense_id: int, house_id: int, db: Session):
-    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+def create_tenant_expenses(expense: Expense, db: Session):
+    tenants = db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
     if not tenants:
         raise HTTPException(status_code=404, detail="No tenants found for the given house")
 
+    # Calculate the share of the expense for each tenant
+    num_tenants = len(tenants)
+    if num_tenants == 0:
+        raise HTTPException(status_code=400, detail="No tenants available for expense division")
+
+    share_per_tenant = round(expense.amount / num_tenants, 2)
+
     tenant_expenses = []
     for tenant in tenants:
-        tenant_expense = TenantExpense(tenant_id=tenant.id, expense_id=expense_id, status='pending')
+        tenant_expense = TenantExpense(
+            tenant_id=tenant.id, 
+            expense_id=expense.id, 
+            status='pending', 
+            amount=share_per_tenant
+        )
         tenant_expenses.append(tenant_expense)
 
     db.bulk_save_objects(tenant_expenses)
@@ -344,7 +356,8 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     db.commit()
     db.refresh(db_expense)
 
-    create_tenant_expenses(db_expense.id, db_expense.house_id, db)
+    # Automatically divide the expense among tenants
+    create_tenant_expenses(db_expense, db)
 
     #Ir buscar os tenants para enviar o email
     tenants= db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
