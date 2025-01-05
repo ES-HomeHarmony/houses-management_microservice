@@ -222,18 +222,31 @@ def update_expense_status_if_paid(expense_id: int, db: Session):
         else:
             raise HTTPException(status_code=404, detail="Expense not found")
         
-def create_tenant_expenses(expense_id: int, house_id: int, db: Session):
-    tenants = db.query(Tenents).filter(Tenents.house_id == house_id).all()
+def create_tenant_expenses(expense: Expense, db: Session):
+    tenants = db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
     if not tenants:
         raise HTTPException(status_code=404, detail="No tenants found for the given house")
 
+    # Calculate the share of the expense for each tenant
+    num_tenants = len(tenants)
+    if num_tenants == 0:
+        raise HTTPException(status_code=400, detail="No tenants available for expense division")
+
+    share_per_tenant = round(expense.amount / num_tenants, 2)
+
     tenant_expenses = []
     for tenant in tenants:
-        tenant_expense = TenantExpense(tenant_id=tenant.id, expense_id=expense_id, status='pending')
+        tenant_expense = TenantExpense(
+            tenant_id=tenant.id, 
+            expense_id=expense.id, 
+            status='pending', 
+            amount=share_per_tenant
+        )
         tenant_expenses.append(tenant_expense)
 
     db.bulk_save_objects(tenant_expenses)
     db.commit()
+
 
 # Criar uma casa para um landlord
 @router.post("/create", response_model=HouseResponse)
@@ -358,8 +371,11 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
 
 # Fazer post de uma nova despesa para uma casa
 @router.post("/addExpense", response_model=ExpenseResponse)
-def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: Session = Depends(get_db)):
-    
+def add_expense(
+    expense_data: str = Form(...), 
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
     # Parse the JSON string into the ExpenseCreate model
     try:
         expense = ExpenseCreate(**json.loads(expense_data))
@@ -368,9 +384,9 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     
     file_url = None
 
+    # Upload file to S3 if provided
     if file:
         try:
-
             if " " in file.filename:
                 file.filename = file.filename.replace(" ", "_")
 
@@ -384,7 +400,8 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
             return JSONResponse(status_code=400, content={"error": "Credenciais não encontradas"})
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
-        
+    
+    # Save expense to the database
     db_expense = Expense(
         house_id=expense.house_id,
         amount=expense.amount,
@@ -400,7 +417,8 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     db.commit()
     db.refresh(db_expense)
 
-    create_tenant_expenses(db_expense.id, db_expense.house_id, db)
+    # Automatically divide the expense among tenants
+    create_tenant_expenses(db_expense, db)
 
     return db_expense
 
