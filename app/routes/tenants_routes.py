@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.kafka import user_cache, producer
 from app.models import House, Tenents, Issue
-from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit
+from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit, TenentResponse
 from typing import List
 import time
 
@@ -112,7 +112,7 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
     db.commit()
     db.refresh(existing_issue)
     return existing_issue
-  
+
 # Endpoint to get houses by tenant
 @router.get("/houses", response_model=List[HouseResponse])
 def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None):
@@ -174,3 +174,17 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db)):
     db.delete(issue)
     db.commit()
     return {"message": "Issue deleted successfully"}
+
+# Get tenant id in the tenents table
+@router.get("/tenantId", response_model=TenentResponse)
+def get_tenant_id(request: Request = None, db: Session = Depends(get_db)):
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+
+    tenant_id = get_tenant_id_via_kafka(access_token)
+
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail=DETAIL)
+    return tenant
