@@ -12,6 +12,7 @@ router = APIRouter(
     tags=["tenants"],
 )
 
+DETAIL = "Tenant not found"
 
 def get_tenant_id_via_kafka(access_token: str):
 
@@ -50,7 +51,7 @@ def tenant_update_id(old_id, new_id, db: Session):
 
     tenant = db.query(Tenents).filter(Tenents.tenent_id == old_id).first()
     if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
+        raise HTTPException(status_code=404, detail=DETAIL)
     
     tenant.tenent_id = new_id
     db.commit()
@@ -71,7 +72,7 @@ def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Req
     # Get Tenant
     tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
     if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
+        raise HTTPException(status_code=404, detail=DETAIL)
     
     new_issue = Issue(
         house_id=issue.house_id,
@@ -124,7 +125,7 @@ def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None)
     tenants = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).all()
     
     if not tenants:
-        raise HTTPException(status_code=404, detail="Tenant not found")
+        raise HTTPException(status_code=404, detail=DETAIL)
     
     houses = []
 
