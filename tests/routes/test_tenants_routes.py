@@ -557,3 +557,52 @@ def test_delete_issue_not_found(mock_query, client_with_access_token):
     response = client_with_access_token.delete(f"/tenants/issues/{MOCK_ISSUE_ID}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Issue not found"
+
+@patch("app.routes.tenants_routes.get_tenant_data")
+@patch("app.routes.tenants_routes.producer.send")
+@patch("sqlalchemy.orm.Session.query")
+def test_notify_kafka(mock_query, mock_producer_send, mock_get_tenant_data):
+    """Test the behavior of notify_kafka function."""
+    
+    # Mock responses for get_tenant_data
+    mock_get_tenant_data.side_effect = [
+        [{"tenant_id": "landlord-id", "name": "Landlord Name", "email": "landlord@example.com"}],  # Landlord data
+        [{"tenant_id": "tenant-id", "name": "Tenant Name", "email": "tenant@example.com"}],        # Tenant 1 data
+        [{"tenant_id": "tenant-id-2", "name": "Tenant Two", "email": "tenant2@example.com"}],      # Tenant 2 data
+    ]
+    
+    # Mock the queries for House and Tenents
+    def query_side_effect(model):
+        if model == House:
+            return MagicMock(filter=MagicMock(return_value=MagicMock(first=MagicMock(return_value=House(
+                id=1,
+                landlord_id="landlord-id",
+                name="Test House",
+                address="123 Test St",
+                city="Test City",
+                state="TS",
+                zipcode="12345"
+            )))))
+        elif model == Tenents:
+            return MagicMock(filter=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
+                Tenents(id=1, house_id=1, tenent_id="tenant-id"),
+                Tenents(id=2, house_id=1, tenent_id="tenant-id-2")
+            ]))))
+        else:
+            raise ValueError(f"Unexpected query model: {model}")
+
+    mock_query.side_effect = query_side_effect
+
+    # Mock issue creation
+    issue_data = IssueCreate(
+        house_id=1,
+        title="Test Issue",
+        description="Test Description",
+        status="open",
+        priority="high"
+    )
+
+    # Call the function directly
+    notify_kafka(db=MagicMock(), issue=issue_data, tenant_id="tenant-id")
+
+   
