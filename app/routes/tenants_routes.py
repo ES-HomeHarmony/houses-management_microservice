@@ -191,6 +191,9 @@ def download_expense_file(db: Session = Depends(get_db), request: Request = None
 
     tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
 
+    if not tenant:
+        raise HTTPException(status_code=404, detail=DETAIL)
+
     # Decodificar a URL com caracteres especiais
     file_url = unquote(tenant.contract)
     print(f"Downloading file from URL: {file_url}")
@@ -199,7 +202,7 @@ def download_expense_file(db: Session = Depends(get_db), request: Request = None
         # Fazer a requisição HTTP ao S3 para buscar o arquivo
         response = requests.get(file_url, stream=True)
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Failed to fetch file from S3")
+            raise HTTPException(status_code=404, detail="Failed to fetch file from S3")
 
         # Obter o nome do arquivo da URL e normalizar
         file_name = file_url.split("/")[-1]

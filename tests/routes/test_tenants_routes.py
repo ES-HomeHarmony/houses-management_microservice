@@ -64,6 +64,22 @@ MOCK_HOUSE_DATA = [
         zipcode="67890",
     ),
 ]
+
+MOCK_CONTRACT_URL = "https://example-bucket.s3.amazonaws.com/contracts/test-contract.pdf"
+MOCK_FILE_CONTENT = b"%PDF-1.4 mock PDF content"
+
+@pytest.fixture
+def mock_tenant():
+    """Fixture for creating a mock tenant."""
+    return Tenents(
+        id=1,
+        tenent_id=MOCK_TENANT_ID,
+        house_id=1,
+        rent=1000.00,
+        contract=MOCK_CONTRACT_URL,
+    )
+
+
 # Fixtures
 @pytest.fixture
 def client_with_access_token(client):
@@ -537,3 +553,60 @@ def test_delete_issue_not_found(mock_query, client_with_access_token):
     response = client_with_access_token.delete(f"/tenants/issues/{MOCK_ISSUE_ID}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Issue not found"
+
+
+@patch("requests.get")  # Correctly patch the global 'requests.get' method
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+def test_download_contract_success(mock_get_tenant_id, mock_requests_get, client_with_access_token, db_session, mock_tenant):
+    """Test successful file download from S3."""
+    # Mock tenant retrieval
+    db_session.add(mock_tenant)
+    db_session.commit()
+
+    # Mock Kafka response
+    mock_get_tenant_id.return_value = MOCK_TENANT_ID
+
+    # Mock S3 file retrieval
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.iter_content = MagicMock(return_value=[MOCK_FILE_CONTENT])
+    mock_requests_get.return_value = mock_response
+
+    # Call the endpoint
+    response = client_with_access_token.get("tenants/downloadContract")
+    assert response.status_code == 200
+    assert response.headers["Content-Disposition"] == f"inline; filename=test-contract.pdf"
+    assert response.content == MOCK_FILE_CONTENT
+
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+def test_download_contract_missing_token(mock_get_tenant_id, client):
+    """Test file download with missing access token."""
+    response = client.get("tenants/downloadContract")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access token missing"
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+def test_download_contract_tenant_not_found(mock_get_tenant_id, client_with_access_token, db_session):
+    """Test file download when tenant is not found."""
+    mock_get_tenant_id.return_value = MOCK_TENANT_ID
+
+    response = client_with_access_token.get("tenants/downloadContract")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Tenant not found"
+
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+@patch("app.routes.tenants_routes.requests.get", side_effect=Exception("S3 connection error"))
+def test_download_contract_unexpected_error(mock_requests_get, mock_get_tenant_id, client_with_access_token, db_session, mock_tenant):
+    """Test unexpected error during file download."""
+    # Mock tenant retrieval
+    db_session.add(mock_tenant)
+    db_session.commit()
+
+    # Mock Kafka response
+    mock_get_tenant_id.return_value = MOCK_TENANT_ID
+
+    response = client_with_access_token.get("tenants/downloadContract")
+    assert response.status_code == 500
+    assert "Unexpected error" in response.json()["detail"]
