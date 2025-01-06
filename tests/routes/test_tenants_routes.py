@@ -537,3 +537,36 @@ def test_delete_issue_not_found(mock_query, client_with_access_token):
     response = client_with_access_token.delete(f"/tenants/issues/{MOCK_ISSUE_ID}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Issue not found"
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka", return_value=MOCK_TENANT_ID)
+def test_get_tenant_id_success(mock_get_kafka, client_with_access_token, db_session):
+    """Test retrieving tenant ID successfully."""
+    mock_tenant = Tenents(
+        id=1,
+        tenent_id=MOCK_TENANT_ID,
+        house_id=1,
+        rent=1000.00,
+        contract="test-contract",
+    )
+    db_session.add(mock_tenant)
+    db_session.commit()
+
+    response = client_with_access_token.get("/tenants/tenantId")
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["id"] == mock_tenant.id
+    assert response_data["tenent_id"] == mock_tenant.tenent_id
+
+def test_get_tenant_id_missing_access_token(client):
+    """Test retrieving tenant ID with missing token."""
+    response = client.get("/tenants/tenantId")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access token missing"
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka", return_value=MOCK_TENANT_ID)
+def test_get_tenant_id_not_found(mock_get_kafka, client_with_access_token, db_session):
+    """Test retrieving tenant ID when tenant is not found."""
+    response = client_with_access_token.get("/tenants/tenantId")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Tenant not found"
+
