@@ -61,6 +61,7 @@ class ContractCreate(BaseModel):
 class TenantExpenseDetail(BaseModel):
     tenant_id: int
     status: str  # Status for the specific tenant's share of the expense
+    tenant_name: Optional[str] = None  # Add the tenant's name
 
 class ExpenseResponse(BaseModel):
     id: int
