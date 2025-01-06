@@ -1,13 +1,12 @@
 import pytest
 from fastapi import HTTPException
-from app.models import Expense, House, Tenents
+from app.models import Expense, House, Tenents, TenantExpense
 from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice, notify_paid
 from unittest.mock import patch, MagicMock, call
 from botocore.exceptions import NoCredentialsError
 from datetime import datetime
 from sqlalchemy.orm import Session 
 import json
-
 
 # Define the data to be sent in the POST request
 house_data = {
