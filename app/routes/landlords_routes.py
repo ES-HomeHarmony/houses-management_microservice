@@ -348,6 +348,37 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
 
     create_tenant_expenses(db_expense.id, db_expense.house_id, db)
 
+    #Ir buscar os tenants para enviar o email
+    tenants= db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
+    # Lista para armazenar os dados dos inquilinos
+    user_data_list = []
+
+    for tenant in tenants:
+        tenant_data = [tenant.tenent_id]
+        tenants_data = get_tenant_data(tenant_data)
+        
+        user_data_list.append({
+            "email": tenants_data[0]["email"],
+            "name": tenants_data[0]["name"]
+        })
+
+    # Cria a mensagem única
+    message = {
+        "action": "expense_created",
+        "user_data": {
+            "expense_details": {
+                "title": expense.title,
+                "amount": expense.amount,
+                "deadline_date": expense.deadline_date.strftime('%Y-%m-%d')
+            },
+            "users": user_data_list
+        }
+    }
+
+    print(message)
+    producer.send('invite-request', message)
+
+        
     return db_expense
 
 
@@ -556,6 +587,7 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
         "name": tenants_data[0]["name"]
         }
     }
+    print(message)
     producer.send('invite-request', message)
 
     return {"message": "Contract uploaded successfully", "file_url": file_url}
