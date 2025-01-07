@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 import json
 import os
@@ -411,7 +411,7 @@ def get_expenses_by_house(house_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/tenants/{tenant_id}/pay")
-def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(get_db)):
+def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(get_db),background_tasks: BackgroundTasks = None):
     tenant_expense = db.query(TenantExpense).filter(
         TenantExpense.tenant_id == tenant_id,
         TenantExpense.expense_id == expense_id
@@ -427,7 +427,43 @@ def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(g
     # Check if the main expense should now be marked as 'paid'
     update_expense_status_if_paid(expense_id, db)
 
+    #Notificar o senhorio que o inquilino pagou assicronamente
+    #Procurar a casa
+     # Adiciona a tarefa em segundo plano
+    background_tasks.add_task(
+        notify_paid,
+        db=db,
+        expense_id=expense_id,
+        tenant_id=tenant_id
+    )
+
     return {"message": "Tenant payment updated successfully"}
+
+def notify_paid(db: Session, expense_id: int, tenant_id: int):
+    print("Notifying landlord that tenant paid...")
+    tenant = db.query(Tenents).filter(Tenents.id == tenant_id).first()
+    house = db.query(House).filter(House.id == tenant.house_id).first()
+    landlord_id = house.landlord_id
+    landlord_data = [landlord_id]
+    print(landlord_data)
+    landlord_data = get_tenant_data(landlord_data)
+    tenant_data = [tenant.tenent_id]
+    tenants_data = get_tenant_data(tenant_data)
+    message = {
+        "action": "tenant_paid",
+        "user_data": {
+            "email": landlord_data[0]["email"],
+            "name": landlord_data[0]["name"],
+            "tenant_name": tenants_data[0]["name"],
+            "expense_name": db.query(Expense).filter(Expense.id == expense_id).first().title,
+            "amount": db.query(Expense).filter(Expense.id == expense_id).first().amount,
+            "house_name": house.name
+            
+        }
+    }
+    producer.send('invite-request', message)
+
+
 
 # Endpoint to get a specific expense by its ID
 # @router.get("/expense/{expense_id}", response_model=ExpenseResponse)

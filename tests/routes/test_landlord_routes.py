@@ -1,12 +1,12 @@
 import pytest
 from fastapi import HTTPException
 from app.models import Expense, House, Tenents, TenantExpense
-from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice
+from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice, notify_paid
 from unittest.mock import patch, MagicMock, call
 from botocore.exceptions import NoCredentialsError
 from datetime import datetime
+from sqlalchemy.orm import Session 
 import json
-
 
 # Define the data to be sent in the POST request
 house_data = {
@@ -943,6 +943,62 @@ def test_uploadContract_filename_with_spaces(mock_s3_client, mock_get_tenant_dat
     mock_get_tenant_data.assert_called_once_with(["1"])
     mock_s3_client.upload_fileobj.assert_called_once()
 
+
+@patch("app.routes.landlords_routes.get_tenant_data")
+@patch("app.routes.landlords_routes.producer")
+def test_notify_paid(mock_producer, mock_get_tenant_data, db_session):
+    # Mocar o banco de dados
+    db = MagicMock(spec=Session)
+    expense_id = 1
+    tenant_id = 2
+
+    # Dados mockados
+    tenant_mock = MagicMock()
+    tenant_mock.id = tenant_id
+    tenant_mock.house_id = 10
+    tenant_mock.tenent_id = "tenant-id-123"
+
+    house_mock = MagicMock()
+    house_mock.id = 10
+    house_mock.landlord_id = "landlord-id-123"
+    house_mock.name = "Test House"
+
+    expense_mock = MagicMock()
+    expense_mock.id = expense_id
+    expense_mock.title = "Rent"
+    expense_mock.amount = 1000.0
+
+    # Configurar retorno do db.query
+    db.query.return_value.filter.return_value.first.side_effect = [
+        tenant_mock,  # tenant
+        house_mock,   # house
+        expense_mock, # expense.title
+        expense_mock  # expense.amount
+    ]
+
+    # Mock da função get_tenant_data
+    mock_get_tenant_data.side_effect = [
+        [{"email": "landlord@example.com", "name": "Landlord Name"}],
+        [{"name": "Tenant Name"}]
+    ]
+
+    # Chamar a função a ser testada
+    notify_paid(db, expense_id, tenant_id)
+
+    # Verificar que o producer.send foi chamado corretamente
+    expected_message = {
+        "action": "tenant_paid",
+        "user_data": {
+            "email": "landlord@example.com",
+            "name": "Landlord Name",
+            "tenant_name": "Tenant Name",
+            "expense_name": "Rent",
+            "amount": 1000.0,
+            "house_name": "Test House"
+        }
+    }
+    mock_producer.send.assert_called_once_with('invite-request', expected_message)
+    
 def test_uploadContract_no_credentials_error(client):
     # Mock the S3 upload to raise NoCredentialsError
     with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:
