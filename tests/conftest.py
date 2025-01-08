@@ -15,6 +15,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def override_get_db() -> Session:
     db = TestingSessionLocal()
     try:
+        print("Tables should be created before this point.")
         yield db
     finally:
         db.close()

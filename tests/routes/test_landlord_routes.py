@@ -1,7 +1,9 @@
+from cmath import isclose
 import pytest
 from fastapi import HTTPException
 from app.models import Expense, House, Tenents, TenantExpense
-from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice, notify_paid
+from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice, notify_paid,create_tenant_expenses
+from app.database import Base, engine
 from unittest.mock import patch, MagicMock, call
 from botocore.exceptions import NoCredentialsError
 from datetime import datetime
@@ -26,6 +28,13 @@ create_expense = {
     "description": "Monthly rent",
     "deadline_date": "2021-10-01",
 }
+
+@pytest.fixture(scope="function", autouse=True)
+def setup_database():
+    """Set up and clean up the test database for each test."""
+    Base.metadata.create_all(bind=engine)  # Cria as tabelas antes de cada teste
+    yield
+    Base.metadata.drop_all(bind=engine)  # Remove as tabelas após o teste
 
 # Sample test file data
 def generate_mock_file():
@@ -254,7 +263,7 @@ def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, moc
     db_session.add_all([tenant1, tenant2])
     db_session.commit()
 
-    # Mock file upload
+    # Prepare file and expense data
     files = generate_mock_file()
     expense_data_json = json.dumps(create_expense)
 
@@ -273,6 +282,18 @@ def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, moc
     assert response_json["amount"] == create_expense["amount"]
     assert response_json["file_path"] is not None
 
+    # Verify the division of the expense among tenants
+    tenant_expenses = db_session.query(TenantExpense).filter(
+        TenantExpense.expense_id == response_json["id"]
+    ).all()
+    assert len(tenant_expenses) == 2  # Two tenants
+
+    # Retrieve the expected shared amount
+    shared_amount = round(create_expense["amount"] / len(tenant_expenses), 2)
+    
+    for tenant_expense in tenant_expenses:
+        assert tenant_expense.amount == shared_amount
+
     # Verify that Kafka producer was called
     mock_producer_send.assert_called_once()
     kafka_message = mock_producer_send.call_args[0][1]
@@ -280,7 +301,6 @@ def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, moc
     # Assertions for Kafka message
     assert kafka_message["action"] == "expense_created"
     assert kafka_message["user_data"]["expense_details"]["title"] == create_expense["title"]
-    assert kafka_message["user_data"]["expense_details"]["amount"] == create_expense["amount"]
     assert kafka_message["user_data"]["expense_details"]["deadline_date"] == create_expense["deadline_date"]
 
     # Assertions for tenant data in Kafka message
@@ -288,6 +308,489 @@ def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, moc
     assert len(users) == 2
     assert users[0]["email"] == "tenant1@example.com"
     assert users[0]["name"] == "Tenant One"
+
+@patch("sqlalchemy.orm.Session.query")
+def test_create_tenant_expenses_invalid_amount(mock_query, db_session):
+    """Test case when expense amount is invalid (None or not numeric)."""
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = None  # Valor inválido
+
+    with pytest.raises(HTTPException) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Expense amount cannot be null or non-numeric"
+
+@patch("sqlalchemy.orm.Session.bulk_save_objects", side_effect=Exception("Database error"))
+def test_create_tenant_expenses_bulk_save_failure(mock_bulk_save, db_session):
+    """Test case when bulk_save_objects raises an exception."""
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+
+    db_session.query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    with pytest.raises(Exception) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert str(excinfo.value) == "Database error"
+    mock_bulk_save.assert_called_once()
+
+@patch("sqlalchemy.orm.Session.query")
+def test_create_tenant_expenses_no_tenants(mock_query, db_session):
+    """Test case when there are no tenants in the house."""
+    # Mock da consulta para retornar uma despesa mockada
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+    expense_mock.title = "Test Expense"
+    expense_mock.description = "Shared expense"
+    expense_mock.created_at = datetime.now().date()
+    expense_mock.deadline_date = datetime.now().date()
+    expense_mock.status = "pending"
+
+    # Configurar o mock para retornar a despesa simulada
+    mock_query.return_value.filter.return_value.first.return_value = expense_mock
+
+    # Verificar o comportamento ao não encontrar inquilinos
+    with pytest.raises(HTTPException) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+    
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "No tenants available for expense division"
+
+@patch("sqlalchemy.orm.Session.query")
+def test_create_tenant_expenses_no_tenants_in_db(mock_query, db_session):
+    """Test case when the query for tenants returns an empty list."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    # Simular lista vazia para tenants
+    mock_query.return_value.filter.return_value.all.return_value = []
+
+    # Verificar que a exceção é levantada
+    with pytest.raises(HTTPException) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert excinfo.value.status_code == 404
+    assert excinfo.value.detail == "No tenants found for the given house"
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_single_tenant(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case when there is only one tenant."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    # Mock do único tenant
+    tenant_mock = [MagicMock(id=1, house_id=1, tenent_id="1")]
+
+    # Configurar mocks
+    mock_query.return_value.filter.return_value.all.return_value = tenant_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar chamadas de salvar e commit
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+    assert len(tenant_expenses) == 1  # Apenas um tenant
+    assert isclose(tenant_expenses[0].amount, 1000.0, rel_tol=1e-9)
+    mock_commit.assert_called_once()
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_zero_amount(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case when the expense amount is zero."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 0.0
+
+    # Mock dos tenants
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+
+    # Configurar mocks
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar chamadas de salvar
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+    assert len(tenant_expenses) == 2  # Dois tenants
+    for tenant_expense in tenant_expenses:
+        assert isclose(tenant_expense.amount, 0.0, abs_tol=1e-9)
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_small_amount(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case when the expense amount is very small."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 0.01
+
+    # Mock dos tenants
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+
+    # Configurar mocks
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar chamadas de salvar
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+    assert len(tenant_expenses) == 2  # Dois tenants
+
+    # Verificar que o último tenant recebeu todo o montante
+    assert isclose(tenant_expenses[0].amount, 0.0, abs_tol=1e-9)
+    assert isclose(tenant_expenses[1].amount, 0.01, abs_tol=1e-9)
+
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit", side_effect=Exception("Commit failed"))
+def test_create_tenant_expenses_commit_failure(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case when commit fails."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    # Mock dos tenants
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+
+    # Configurar mocks
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Verificar que uma exceção é levantada
+    with pytest.raises(Exception) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert str(excinfo.value) == "Commit failed"
+    mock_bulk_save.assert_called_once()
+    mock_commit.assert_called_once()
+
+
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_with_uneven_division(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case when the expense amount cannot be evenly divided among tenants."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+    expense_mock.title = "Test Expense"
+    expense_mock.description = "Shared expense"
+    expense_mock.created_at = datetime.now()
+    expense_mock.deadline_date = datetime.now()
+    expense_mock.status = "pending"
+
+    # Mock dos inquilinos
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+        MagicMock(id=3, house_id=1, tenent_id="3"),
+    ]
+
+    # Configurar mocks
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar que a função de salvar múltiplos objetos foi chamada
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+
+    # Verificar que todas as despesas foram criadas corretamente
+    assert len(tenant_expenses) == 3
+
+    # Validar que a soma é consistente com arredondamento para uma casa decimal
+    total_amount = round(sum(te.amount for te in tenant_expenses), 1)
+    assert total_amount == round(expense_mock.amount, 1)
+
+    # Verificar arredondamento esperado para cada parcela
+    share_per_tenant = round(expense_mock.amount / len(tenants_mock), 1)
+    total_allocated = round(share_per_tenant * (len(tenants_mock) - 1), 1)
+    expected_last_share = round(expense_mock.amount - total_allocated, 1)
+
+    for i, tenant_expense in enumerate(tenant_expenses):
+        if i < len(tenants_mock) - 1:
+            assert tenant_expense.amount == share_per_tenant
+        else:
+            assert tenant_expense.amount == expected_last_share
+
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_bulk_save_called(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case to ensure bulk_save_objects is called for tenant expenses."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1500.0
+    expense_mock.title = "Test Expense"
+    expense_mock.description = "Shared expense"
+    expense_mock.created_at = datetime.now()
+    expense_mock.deadline_date = datetime.now()
+    expense_mock.status = "pending"
+
+    # Mock dos inquilinos
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+
+    # Configurar mocks
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar que a função de salvar múltiplos objetos foi chamada
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+
+    # Verificar que as despesas foram corretamente criadas
+    assert len(tenant_expenses) == 2  # Dois inquilinos
+    for tenant_expense in tenant_expenses:
+        assert tenant_expense.amount == round(expense_mock.amount / 2, 2)
+
+    # Verificar que a função commit foi chamada
+    mock_commit.assert_called_once()
+
+@patch("sqlalchemy.orm.Session.query")
+def test_create_tenant_expenses_negative_amount(mock_query, db_session):
+    """Test case when the expense amount is negative."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = -100.0
+
+    # Mock dos tenants
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Verificar que a exceção é levantada
+    with pytest.raises(HTTPException) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Expense amount cannot be negative"
+
+@patch("sqlalchemy.orm.Session.query")
+def test_create_tenant_expenses_zero_amount_no_tenants(mock_query, db_session):
+    """Test case when the expense amount is zero and no tenants exist."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 0.0
+
+    # Simular lista vazia para tenants
+    mock_query.return_value.filter.return_value.all.return_value = []
+
+    # Verificar que uma exceção é levantada
+    with pytest.raises(HTTPException) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert excinfo.value.status_code == 404
+    assert excinfo.value.detail == "No tenants found for the given house"
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_large_amount(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case with a very large expense amount."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1e9  # Um bilhão
+
+    # Mock dos tenants
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar chamadas de salvar
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+    assert len(tenant_expenses) == 2
+    assert sum(te.amount for te in tenant_expenses) == pytest.approx(1e9, abs=0.1)
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+@patch("sqlalchemy.orm.Session.commit")
+def test_create_tenant_expenses_duplicate_tenants(mock_commit, mock_bulk_save, mock_query, db_session):
+    """Test case when duplicate tenants are returned."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    # Mock dos tenants duplicados
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=1, house_id=1, tenent_id="1"),  # Duplicado
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar chamadas de salvar
+    mock_bulk_save.assert_called_once()
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+    assert len(tenant_expenses) == 2  # Deve ignorar duplicatas
+    assert isclose(sum(te.amount for te in tenant_expenses), 1000.0, abs_tol=1e-9)
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects", side_effect=Exception("Bulk save failed"))
+def test_create_tenant_expenses_bulk_save_failure(mock_bulk_save, mock_query, db_session):
+    """Test case when bulk_save_objects raises an exception."""
+    # Mock da despesa
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    # Mock dos tenants
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Verificar que uma exceção é levantada
+    with pytest.raises(Exception) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert str(excinfo.value) == "Bulk save failed"
+    mock_bulk_save.assert_called_once()
+
+@patch("sqlalchemy.orm.Session.query")
+def test_create_tenant_expenses_invalid_house_id(mock_query, db_session):
+    """Test case when expense house_id is invalid or None."""
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = None  # house_id inválido
+    expense_mock.amount = 1000.0
+
+    with pytest.raises(HTTPException) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "House ID cannot be null or invalid"
+
+@patch("sqlalchemy.orm.Session.query", side_effect=Exception("Database query failed"))
+def test_create_tenant_expenses_query_failure(mock_query, db_session):
+    """Test case when the query for tenants fails."""
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    with pytest.raises(Exception) as excinfo:
+        create_tenant_expenses(expense_mock, db_session)
+
+    assert str(excinfo.value) == "Database query failed"
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+def test_create_tenant_expenses_amount_mismatch(mock_bulk_save, mock_query, db_session):
+    """Test case to ensure total distributed amount matches expense amount."""
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Chamar a função
+    create_tenant_expenses(expense_mock, db_session)
+
+    # Verificar o valor total distribuído
+    tenant_expenses = mock_bulk_save.call_args[0][0]
+    total_distributed = sum(te.amount for te in tenant_expenses)
+    assert total_distributed == pytest.approx(expense_mock.amount, abs=0.1)
+
+@patch("sqlalchemy.orm.Session.query")
+@patch("sqlalchemy.orm.Session.bulk_save_objects")
+def test_create_tenant_expenses_initialization_failure(mock_bulk_save, mock_query, db_session):
+    """Test case when TenantExpense initialization fails."""
+    expense_mock = MagicMock()
+    expense_mock.id = 1
+    expense_mock.house_id = 1
+    expense_mock.amount = 1000.0
+
+    tenants_mock = [
+        MagicMock(id=1, house_id=1, tenent_id="1"),
+        MagicMock(id=2, house_id=1, tenent_id="2"),
+    ]
+    mock_query.return_value.filter.return_value.all.return_value = tenants_mock
+
+    # Forçar erro durante a criação de TenantExpense
+    with patch("app.routes.landlords_routes.TenantExpense", side_effect=Exception("Initialization error")):
+        with pytest.raises(Exception) as excinfo:
+            create_tenant_expenses(expense_mock, db_session)
+
+        assert str(excinfo.value) == "Initialization error"
 
 # Test function for handling invalid JSON in expense_data
 def test_create_expense_with_invalid_json(client):

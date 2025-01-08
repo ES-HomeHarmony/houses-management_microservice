@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Double, Date
+from sqlalchemy import Column, Float, Integer, String, ForeignKey, Double, Date
 from sqlalchemy.orm import relationship
 import datetime
 from app.database import Base
@@ -57,6 +57,8 @@ class TenantExpense(Base):
 
     tenant = relationship("Tenents", back_populates="expenses")
     expense = relationship("Expense", back_populates="tenants")
+    amount = Column(Float)  # Adiciona o campo amount
+
 
 class Issue(Base):
     __tablename__ = 'issues'
