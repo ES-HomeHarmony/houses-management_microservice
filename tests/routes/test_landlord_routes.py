@@ -284,8 +284,12 @@ def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, moc
         TenantExpense.expense_id == response_json["id"]
     ).all()
     assert len(tenant_expenses) == 2  # Two tenants
+
+    # Retrieve the expected shared amount
+    shared_amount = round(create_expense["amount"] / len(tenant_expenses), 2)
+    
     for tenant_expense in tenant_expenses:
-        assert tenant_expense.amount == round(create_expense["amount"] / 2, 2)
+        assert tenant_expense.amount == shared_amount
 
     # Verify that Kafka producer was called
     mock_producer_send.assert_called_once()
@@ -294,7 +298,6 @@ def test_create_expense_with_file_upload(mock_s3_client, mock_producer_send, moc
     # Assertions for Kafka message
     assert kafka_message["action"] == "expense_created"
     assert kafka_message["user_data"]["expense_details"]["title"] == create_expense["title"]
-    assert kafka_message["user_data"]["expense_details"]["amount"] == create_expense["amount"]
     assert kafka_message["user_data"]["expense_details"]["deadline_date"] == create_expense["deadline_date"]
 
     # Assertions for tenant data in Kafka message

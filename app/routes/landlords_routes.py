@@ -210,6 +210,8 @@ def create_tenant_expenses(expense: Expense, db: Session):
     db.bulk_save_objects(tenant_expenses)
     db.commit()
 
+    return tenant_expenses[0].amount
+
 
 # Criar uma casa para um landlord
 @router.post("/create", response_model=HouseResponse)
@@ -377,7 +379,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     db.refresh(db_expense)
 
     # Automatically divide the expense among tenants
-    create_tenant_expenses(db_expense, db)
+    bill = create_tenant_expenses(db_expense, db)
 
     #Ir buscar os tenants para enviar o email
     tenants= db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
@@ -399,7 +401,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
         "user_data": {
             "expense_details": {
                 "title": expense.title,
-                "amount": expense.amount,
+                "amount": bill,
                 "deadline_date": expense.deadline_date.strftime('%Y-%m-%d')
             },
             "users": user_data_list
