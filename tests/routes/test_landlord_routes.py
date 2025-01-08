@@ -1,13 +1,15 @@
 from cmath import isclose
 import pytest
 from fastapi import HTTPException
-from app.models import Expense, House, TenantExpense, Tenents
-from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice,create_tenant_expenses
+from app.models import Expense, House, Tenents, TenantExpense
+from app.routes.landlords_routes import get_landlord_id_via_kafka, create_user_in_user_microservice, notify_paid,create_tenant_expenses
+from app.database import Base, engine
 from unittest.mock import patch, MagicMock, call
 from botocore.exceptions import NoCredentialsError
 from datetime import datetime
+from sqlalchemy.orm import Session 
 import json
-from app.database import Base, engine
+
 # Define the data to be sent in the POST request
 house_data = {
     "name": "Test House",
@@ -1110,30 +1112,101 @@ def test_mark_tenant_payment_not_found(client):
         assert response.status_code == 404
         assert response.json()["detail"] == "Not Found"  # Ensure this matches the route's detail
 
-# Test for getting a specific expense by ID
+# # Test for getting a specific expense by ID
+# @patch("sqlalchemy.orm.Session.query")
+# def test_get_expense_by_id(mock_query, client):
+#     # Create a mock expense record with date fields
+#     expense = Expense(
+#         id=1,
+#         house_id=1,
+#         amount=1000.0,
+#         title="Rent",
+#         description="Monthly rent",
+#         created_at=datetime.now().date(),  # Convert to date
+#         deadline_date=datetime.now().date(),  # Convert to date
+#         file_path=None,
+#         status="pending"
+#     )
+#     mock_query.return_value.filter.return_value.first.return_value = expense
+
+#     response = client.get("/houses/expense/1")
+
+#     assert response.status_code == 200
+#     response_data = response.json()
+#     assert response_data["id"] == expense.id
+#     assert response_data["title"] == expense.title
+
+# def test_get_expense_by_id_not_found(client):
+#     with patch("sqlalchemy.orm.Session.query") as mock_query:
+#         mock_query.return_value.filter.return_value.first.return_value = None
+
+#         response = client.get("/houses/expense/999")
+
+#         assert response.status_code == 404
+#         assert response.json()["detail"] == "Expense not found"
+
+# Test for getting a specific expense by ID with tenant details
+@patch("app.routes.landlords_routes.get_tenant_data")
 @patch("sqlalchemy.orm.Session.query")
-def test_get_expense_by_id(mock_query, client):
-    # Create a mock expense record with date fields
+def test_get_expense_by_id_with_tenants(mock_query, mock_get_tenant_data, client):
+    # Mock expense record
     expense = Expense(
         id=1,
         house_id=1,
         amount=1000.0,
         title="Rent",
         description="Monthly rent",
-        created_at=datetime.now().date(),  # Convert to date
-        deadline_date=datetime.now().date(),  # Convert to date
+        created_at=datetime.now().date(),
+        deadline_date=datetime.now().date(),
         file_path=None,
-        status="pending"
+        status="pending",
     )
-    mock_query.return_value.filter.return_value.first.return_value = expense
 
+    # Mock tenant expenses
+    tenant_expenses = [
+        TenantExpense(tenant_id=101, expense_id=1, status="unpaid"),
+        TenantExpense(tenant_id=102, expense_id=1, status="paid"),
+    ]
+
+    # Mock tenant records
+    tenant_records = [
+        Tenents(id=101, tenent_id="cognito_101"),
+        Tenents(id=102, tenent_id="cognito_102"),
+    ]
+
+    # Mock tenant data fetched via Cognito IDs
+    tenant_data = [
+        {"tenant_id": "cognito_101", "name": "Tenant A", "email": "a@example.com"},
+        {"tenant_id": "cognito_102", "name": "Tenant B", "email": "b@example.com"},
+    ]
+
+    # Set up mocks
+    mock_query.side_effect = lambda model: {
+        Expense: MagicMock(filter=MagicMock(return_value=MagicMock(first=MagicMock(return_value=expense)))),
+        TenantExpense: MagicMock(
+            filter=MagicMock(return_value=MagicMock(all=MagicMock(return_value=tenant_expenses)))
+        ),
+        Tenents: MagicMock(filter=MagicMock(return_value=MagicMock(all=MagicMock(return_value=tenant_records)))),
+    }[model]
+
+    mock_get_tenant_data.return_value = tenant_data
+
+    # Perform the GET request
     response = client.get("/houses/expense/1")
 
+    # Assert response status
     assert response.status_code == 200
+
+    # Assert response data
     response_data = response.json()
     assert response_data["id"] == expense.id
     assert response_data["title"] == expense.title
+    assert response_data["tenants"] == [
+        {"tenant_id": 101, "status": "unpaid", "tenant_name": "Tenant A"},
+        {"tenant_id": 102, "status": "paid", "tenant_name": "Tenant B"},
+    ]
 
+# Test for expense not found
 def test_get_expense_by_id_not_found(client):
     with patch("sqlalchemy.orm.Session.query") as mock_query:
         mock_query.return_value.filter.return_value.first.return_value = None
@@ -1142,6 +1215,43 @@ def test_get_expense_by_id_not_found(client):
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Expense not found"
+
+# Test for tenants not found
+@patch("sqlalchemy.orm.Session.query")
+def test_get_expense_by_id_tenants_not_found(mock_query, client):
+    # Mock expense record
+    expense = Expense(
+        id=1,
+        house_id=1,
+        amount=1000.0,
+        title="Rent",
+        description="Monthly rent",
+        created_at=datetime.now().date(),
+        deadline_date=datetime.now().date(),
+        file_path=None,
+        status="pending",
+    )
+
+    # Mock empty tenant records
+    tenant_expenses = []
+    tenant_records = []
+
+    # Set up mocks
+    mock_query.side_effect = lambda model: {
+        Expense: MagicMock(filter=MagicMock(return_value=MagicMock(first=MagicMock(return_value=expense)))),
+        TenantExpense: MagicMock(
+            filter=MagicMock(return_value=MagicMock(all=MagicMock(return_value=tenant_expenses)))
+        ),
+        Tenents: MagicMock(filter=MagicMock(return_value=MagicMock(all=MagicMock(return_value=tenant_records)))),
+    }[model]
+
+    # Perform the GET request
+    response = client.get("/houses/expense/1")
+
+    # Assert response status
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Tenants not found"
+
 
 # Test for deleting an expense
 @patch("sqlalchemy.orm.Session.commit")
@@ -1336,6 +1446,62 @@ def test_uploadContract_filename_with_spaces(mock_s3_client, mock_get_tenant_dat
     mock_get_tenant_data.assert_called_once_with(["1"])
     mock_s3_client.upload_fileobj.assert_called_once()
 
+
+@patch("app.routes.landlords_routes.get_tenant_data")
+@patch("app.routes.landlords_routes.producer")
+def test_notify_paid(mock_producer, mock_get_tenant_data, db_session):
+    # Mocar o banco de dados
+    db = MagicMock(spec=Session)
+    expense_id = 1
+    tenant_id = 2
+
+    # Dados mockados
+    tenant_mock = MagicMock()
+    tenant_mock.id = tenant_id
+    tenant_mock.house_id = 10
+    tenant_mock.tenent_id = "tenant-id-123"
+
+    house_mock = MagicMock()
+    house_mock.id = 10
+    house_mock.landlord_id = "landlord-id-123"
+    house_mock.name = "Test House"
+
+    expense_mock = MagicMock()
+    expense_mock.id = expense_id
+    expense_mock.title = "Rent"
+    expense_mock.amount = 1000.0
+
+    # Configurar retorno do db.query
+    db.query.return_value.filter.return_value.first.side_effect = [
+        tenant_mock,  # tenant
+        house_mock,   # house
+        expense_mock, # expense.title
+        expense_mock  # expense.amount
+    ]
+
+    # Mock da função get_tenant_data
+    mock_get_tenant_data.side_effect = [
+        [{"email": "landlord@example.com", "name": "Landlord Name"}],
+        [{"name": "Tenant Name"}]
+    ]
+
+    # Chamar a função a ser testada
+    notify_paid(db, expense_id, tenant_id)
+
+    # Verificar que o producer.send foi chamado corretamente
+    expected_message = {
+        "action": "tenant_paid",
+        "user_data": {
+            "email": "landlord@example.com",
+            "name": "Landlord Name",
+            "tenant_name": "Tenant Name",
+            "expense_name": "Rent",
+            "amount": 1000.0,
+            "house_name": "Test House"
+        }
+    }
+    mock_producer.send.assert_called_once_with('invite-request', expected_message)
+    
 def test_uploadContract_no_credentials_error(client):
     # Mock the S3 upload to raise NoCredentialsError
     with patch("app.routes.landlords_routes.s3_client.upload_fileobj") as mock_upload:

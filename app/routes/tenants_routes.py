@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.kafka import user_cache, producer
 from app.models import House, Tenents, Issue
-from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit
+from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit, TenentResponse
 from typing import List
 import time
+from app.routes.landlords_routes import get_tenant_data
 
 router = APIRouter(
     prefix="/tenants",
@@ -59,7 +60,7 @@ def tenant_update_id(old_id, new_id, db: Session):
     return
 
 @router.post("/createIssue", response_model=IssueResponse)
-def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Request = None):
+def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Request = None, background_tasks: BackgroundTasks = None):
 
     # Extract access_token from cookies
     access_token = request.cookies.get("access_token")
@@ -86,7 +87,58 @@ def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Req
     db.add(new_issue)
     db.commit()
     db.refresh(new_issue)
+
+    # Adiciona a tarefa em segundo plano
+    background_tasks.add_task(
+        notify_kafka,
+        db=db,
+        issue=issue,
+        tenant_id=tenant_id
+    )
+
     return new_issue
+
+def notify_kafka(db: Session, issue: IssueCreate, tenant_id: str):
+    landlord_id = db.query(House).filter(House.id == issue.house_id).first().landlord_id
+    landlord_data = get_tenant_data([landlord_id])
+    tenant_main = get_tenant_data([tenant_id])
+    tenants = db.query(Tenents).filter(Tenents.house_id == issue.house_id).all()
+
+    user_data_list = []
+    house_details = db.query(House).filter(House.id == issue.house_id).first()
+
+    for tenant in tenants:
+        tenant_data = [tenant.tenent_id]
+        tenants_data = get_tenant_data(tenant_data)
+        
+        user_data_list.append({
+            "email": tenants_data[0]["email"],
+            "name": tenants_data[0]["name"]
+        })
+
+    user_data_list.append({
+        "email": landlord_data[0]["email"],
+        "name": landlord_data[0]["name"]
+    })
+
+    message = {
+        "action": "new_issue",
+        "user_data":{
+            "issue": {
+                "title": issue.title,
+                "description": issue.description,
+                "status": issue.status,
+                "priority": issue.priority
+            },
+            "house_name": house_details.name,
+            "tenant_name": tenant_main[0]["name"],
+            "users": user_data_list
+        }
+    }
+
+    # Aqui você enviaria a mensagem ao Kafka
+    print(f"Message to be sent: {message}")
+    producer.send("invite-request", message)
 
 @router.put("/updateIssue", response_model=IssueResponse)
 def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Request = None):
@@ -112,7 +164,7 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
     db.commit()
     db.refresh(existing_issue)
     return existing_issue
-  
+
 # Endpoint to get houses by tenant
 @router.get("/houses", response_model=List[HouseResponse])
 def get_houses_by_tenant(db: Session = Depends(get_db), request: Request = None):
@@ -174,3 +226,17 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db)):
     db.delete(issue)
     db.commit()
     return {"message": "Issue deleted successfully"}
+
+# Get tenant id in the tenents table
+@router.get("/tenantId", response_model=TenentResponse)
+def get_tenant_id(request: Request = None, db: Session = Depends(get_db)):
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Access token missing")
+
+    tenant_id = get_tenant_id_via_kafka(access_token)
+
+    tenant = db.query(Tenents).filter(Tenents.tenent_id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail=DETAIL)
+    return tenant

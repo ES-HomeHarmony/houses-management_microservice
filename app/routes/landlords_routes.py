@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 import json
 import os
@@ -123,8 +123,10 @@ def get_tenant_data(tenant_ids: list):
     tenant_data = []
     processed_tenant_ids = set()
 
-    for _ in range(5): 
+    print(f"Waiting for tenant data...{tenant_ids}")
+    for _ in range(7): 
         if tenant_data_dict:
+            print(f"tenant_data_dict received: {tenant_data_dict}")
             for tenant_entry in tenant_data_dict:
                 for tenant_id in tenant_entry.keys():
                     if tenant_id in tenant_ids and tenant_id not in processed_tenant_ids:
@@ -444,7 +446,7 @@ def get_expenses_by_house(house_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/tenants/{tenant_id}/pay")
-def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(get_db)):
+def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(get_db),background_tasks: BackgroundTasks = None):
     tenant_expense = db.query(TenantExpense).filter(
         TenantExpense.tenant_id == tenant_id,
         TenantExpense.expense_id == expense_id
@@ -460,16 +462,123 @@ def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(g
     # Check if the main expense should now be marked as 'paid'
     update_expense_status_if_paid(expense_id, db)
 
+    #Notificar o senhorio que o inquilino pagou assicronamente
+    #Procurar a casa
+     # Adiciona a tarefa em segundo plano
+    background_tasks.add_task(
+        notify_paid,
+        db=db,
+        expense_id=expense_id,
+        tenant_id=tenant_id
+    )
+
     return {"message": "Tenant payment updated successfully"}
 
+def notify_paid(db: Session, expense_id: int, tenant_id: int):
+    print("Notifying landlord that tenant paid...")
+    tenant = db.query(Tenents).filter(Tenents.id == tenant_id).first()
+    house = db.query(House).filter(House.id == tenant.house_id).first()
+    landlord_id = house.landlord_id
+    landlord_data = [landlord_id]
+    print(landlord_data)
+    landlord_data = get_tenant_data(landlord_data)
+    tenant_data = [tenant.tenent_id]
+    tenants_data = get_tenant_data(tenant_data)
+    message = {
+        "action": "tenant_paid",
+        "user_data": {
+            "email": landlord_data[0]["email"],
+            "name": landlord_data[0]["name"],
+            "tenant_name": tenants_data[0]["name"],
+            "expense_name": db.query(Expense).filter(Expense.id == expense_id).first().title,
+            "amount": db.query(Expense).filter(Expense.id == expense_id).first().amount,
+            "house_name": house.name
+            
+        }
+    }
+    producer.send('invite-request', message)
+
+
+
 # Endpoint to get a specific expense by its ID
+# @router.get("/expense/{expense_id}", response_model=ExpenseResponse)
+# def get_expense_by_id(expense_id: int, db: Session = Depends(get_db)):
+#     expense = db.query(Expense).filter(Expense.id == expense_id).first()
+#     if not expense:
+#         raise HTTPException(status_code=404, detail="Expense not found")
+#     print(expense.__dict__)
+#     return expense
+
 @router.get("/expense/{expense_id}", response_model=ExpenseResponse)
 def get_expense_by_id(expense_id: int, db: Session = Depends(get_db)):
+    # Fetch the expense
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
-    print(expense.__dict__)
-    return expense
+
+    # Fetch tenant payment statuses for the expense
+    tenant_expenses = db.query(TenantExpense).filter(TenantExpense.expense_id == expense_id).all()
+
+    # if not tenant_expenses:
+    #     return {
+    #         "id": expense.id,
+    #         "house_id": expense.house_id,
+    #         "amount": expense.amount,
+    #         "title": expense.title,
+    #         "description": expense.description,
+    #         "created_at": expense.created_at,
+    #         "deadline_date": expense.deadline_date,
+    #         "file_path": expense.file_path,
+    #         "status": expense.status,
+    #         "tenants": []  # Return an empty list if there are no tenants
+    #     }
+
+    # Fetch Cognito IDs for the tenants
+    tenant_ids = [te.tenant_id for te in tenant_expenses]
+    tenant_records = db.query(Tenents).filter(Tenents.id.in_(tenant_ids)).all()
+
+    if not tenant_records:
+        raise HTTPException(status_code=404, detail="Tenants not found")
+
+    cognito_ids = [tenant.tenent_id for tenant in tenant_records]
+    print("Cognito IDs:", cognito_ids)
+
+    for tenant in tenant_records:
+        print(tenant.__dict__)
+    # Fetch tenant data (name and email) using the Cognito IDs
+    tenant_data = get_tenant_data(cognito_ids)
+
+    # Combine tenant payment statuses with tenant details
+    tenants = [
+        {
+            "tenant_id": te.tenant_id,
+            "status": te.status,
+            "tenant_name": next(
+                (tenant["name"] for tenant in tenant_data if tenant["tenant_id"] == tenant_record.tenent_id),
+                "Unknown"  # Default to "Unknown" if no name is found
+            )
+        }
+        for te in tenant_expenses
+        for tenant_record in tenant_records
+        if te.tenant_id == tenant_record.id
+    ]
+
+    # Build the response
+    response = {
+        "id": expense.id,
+        "house_id": expense.house_id,
+        "amount": expense.amount,
+        "title": expense.title,
+        "description": expense.description,
+        "created_at": expense.created_at,
+        "deadline_date": expense.deadline_date,
+        "file_path": expense.file_path,
+        "status": expense.status,
+        "tenants": tenants
+    }
+
+    return response
+
 
 
 #delete expenses from a house
