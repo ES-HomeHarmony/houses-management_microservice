@@ -1,3 +1,4 @@
+from cmath import isclose
 import pytest
 from fastapi import HTTPException
 from app.models import Expense, House, TenantExpense, Tenents
@@ -408,7 +409,7 @@ def test_create_tenant_expenses_single_tenant(mock_commit, mock_bulk_save, mock_
     mock_bulk_save.assert_called_once()
     tenant_expenses = mock_bulk_save.call_args[0][0]
     assert len(tenant_expenses) == 1  # Apenas um tenant
-    assert tenant_expenses[0].amount == 1000.0  # Valor total atribuído ao único tenant
+    assert isclose(tenant_expenses[0].amount, 1000.0, rel_tol=1e-9)
     mock_commit.assert_called_once()
 
 @patch("sqlalchemy.orm.Session.query")
@@ -439,7 +440,7 @@ def test_create_tenant_expenses_zero_amount(mock_commit, mock_bulk_save, mock_qu
     tenant_expenses = mock_bulk_save.call_args[0][0]
     assert len(tenant_expenses) == 2  # Dois tenants
     for tenant_expense in tenant_expenses:
-        assert tenant_expense.amount == 0.0
+        assert isclose(tenant_expense.amount, 0.0, abs_tol=1e-9)
 
 @patch("sqlalchemy.orm.Session.query")
 @patch("sqlalchemy.orm.Session.bulk_save_objects")
@@ -470,8 +471,8 @@ def test_create_tenant_expenses_small_amount(mock_commit, mock_bulk_save, mock_q
     assert len(tenant_expenses) == 2  # Dois tenants
 
     # Verificar que o último tenant recebeu todo o montante
-    assert tenant_expenses[0].amount == 0.0  # Primeiro tenant recebe 0.0
-    assert tenant_expenses[1].amount == 0.01  # Último tenant recebe 0.01
+    assert isclose(tenant_expenses[0].amount, 0.0, abs_tol=1e-9)
+    assert isclose(tenant_expenses[1].amount, 0.01, abs_tol=1e-9)
 
 
 @patch("sqlalchemy.orm.Session.query")
@@ -691,7 +692,7 @@ def test_create_tenant_expenses_duplicate_tenants(mock_commit, mock_bulk_save, m
     mock_bulk_save.assert_called_once()
     tenant_expenses = mock_bulk_save.call_args[0][0]
     assert len(tenant_expenses) == 2  # Deve ignorar duplicatas
-    assert sum(te.amount for te in tenant_expenses) == 1000.0
+    assert isclose(sum(te.amount for te in tenant_expenses), 1000.0, abs_tol=1e-9)
 
 @patch("sqlalchemy.orm.Session.query")
 @patch("sqlalchemy.orm.Session.bulk_save_objects", side_effect=Exception("Bulk save failed"))
