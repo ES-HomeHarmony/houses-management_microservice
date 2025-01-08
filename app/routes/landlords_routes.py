@@ -147,8 +147,6 @@ def get_tenant_data(tenant_ids: list):
 
     return tenant_data
 
-
-
 def update_expense_status_if_paid(expense_id: int, db: Session):
     # Query all TenantExpense entries related to the given expense
     tenant_expenses = db.query(TenantExpense).filter(TenantExpense.expense_id == expense_id).all()
@@ -167,29 +165,53 @@ def update_expense_status_if_paid(expense_id: int, db: Session):
             raise HTTPException(status_code=404, detail="Expense not found")
         
 def create_tenant_expenses(expense: Expense, db: Session):
+    
+    # Validar se o valor do montante é válido
+    if expense.amount is None or not isinstance(expense.amount, (int, float)):
+        raise HTTPException(status_code=400, detail="Expense amount cannot be null or non-numeric")
+
+    if expense.amount < 0:
+        raise HTTPException(status_code=400, detail="Expense amount cannot be negative")
+
+    # Validar se o house_id é válido
+    if expense.house_id is None or not isinstance(expense.house_id, int):
+        raise HTTPException(status_code=400, detail="House ID cannot be null or invalid")
+
     tenants = db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
     if not tenants:
         raise HTTPException(status_code=404, detail="No tenants found for the given house")
 
-    # Calculate the share of the expense for each tenant
-    num_tenants = len(tenants)
+    # Garantir unicidade de tenants
+    unique_tenants = list({tenant.id: tenant for tenant in tenants}.values())
+
+    num_tenants = len(unique_tenants)
     if num_tenants == 0:
         raise HTTPException(status_code=400, detail="No tenants available for expense division")
 
-    share_per_tenant = round(expense.amount / num_tenants, 2)
+    if expense.amount < 0.1:
+        share_per_tenant = 0.0
+        last_share = expense.amount
+    else:
+        share_per_tenant = round(expense.amount / num_tenants, 1)
+        total_allocated = round(share_per_tenant * (num_tenants - 1), 1)
+        last_share = round(expense.amount - total_allocated, 1)
 
     tenant_expenses = []
-    for tenant in tenants:
+    for i, tenant in enumerate(unique_tenants):
+        amount = share_per_tenant if i < num_tenants - 1 else last_share
         tenant_expense = TenantExpense(
-            tenant_id=tenant.id, 
-            expense_id=expense.id, 
-            status='pending', 
-            amount=share_per_tenant
+            tenant_id=tenant.id,
+            expense_id=expense.id,
+            status='pending',
+            amount=amount,
         )
         tenant_expenses.append(tenant_expense)
 
     db.bulk_save_objects(tenant_expenses)
     db.commit()
+
+    return tenant_expenses[0].amount
+
 
 # Criar uma casa para um landlord
 @router.post("/create", response_model=HouseResponse)
@@ -357,7 +379,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
     db.refresh(db_expense)
 
     # Automatically divide the expense among tenants
-    create_tenant_expenses(db_expense, db)
+    bill = create_tenant_expenses(db_expense, db)
 
     #Ir buscar os tenants para enviar o email
     tenants= db.query(Tenents).filter(Tenents.house_id == expense.house_id).all()
@@ -379,7 +401,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
         "user_data": {
             "expense_details": {
                 "title": expense.title,
-                "amount": expense.amount,
+                "amount": bill,
                 "deadline_date": expense.deadline_date.strftime('%Y-%m-%d')
             },
             "users": user_data_list
