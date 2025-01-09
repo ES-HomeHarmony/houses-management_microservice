@@ -2,8 +2,8 @@ import pytest
 from fastapi import HTTPException
 from unittest.mock import patch, MagicMock
 from app.models import House, Tenents, Issue
-from app.routes.tenants_routes import get_tenant_id_via_kafka
-from app.schemas import IssueResponse
+from app.routes.tenants_routes import get_tenant_id_via_kafka, tenant_update_id, notify_kafka
+from app.schemas import IssueResponse, IssueCreate
 from datetime import date
 
 # Constantes para valores mock
@@ -64,6 +64,22 @@ MOCK_HOUSE_DATA = [
         zipcode="67890",
     ),
 ]
+
+MOCK_CONTRACT_URL = "https://example-bucket.s3.amazonaws.com/contracts/test-contract.pdf"
+MOCK_FILE_CONTENT = b"%PDF-1.4 mock PDF content"
+
+@pytest.fixture
+def mock_tenant():
+    """Fixture for creating a mock tenant."""
+    return Tenents(
+        id=1,
+        tenent_id=MOCK_TENANT_ID,
+        house_id=1,
+        rent=1000.00,
+        contract=MOCK_CONTRACT_URL,
+    )
+
+
 # Fixtures
 @pytest.fixture
 def client_with_access_token(client):
@@ -112,34 +128,81 @@ def test_get_tenant_id_via_kafka_producer_exception():
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == "Unauthorized"
 
-# Test createIssue endpoint
-def test_create_issue(client_with_access_token, db_session):
-    """Test successful issue creation using the test database."""
-    # Add a mock tenant to the database
+def test_tenant_update_id_success(mock_db_session):
+    """Test successful tenant ID update."""
+    # Mock tenant instance
     mock_tenant = Tenents(
         id=1,
-        tenent_id=MOCK_TENANT_ID,
+        tenent_id="old-tenant-id",
         house_id=1,
+        rent=1000.00,
+        contract="test-contract",
+    )
+    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_tenant
+
+    # Call the function
+    tenant_update_id("old-tenant-id", "new-tenant-id", mock_db_session)
+
+    # Assertions
+    assert mock_tenant.tenent_id == "new-tenant-id"
+    mock_db_session.commit.assert_called_once()
+    mock_db_session.refresh.assert_called_once_with(mock_tenant)
+
+def test_tenant_update_id_not_found(mock_db_session):
+    """Test tenant update with non-existing tenant."""
+    mock_db_session.query.return_value.filter.return_value.first.return_value = None
+
+    # Call the function and expect an exception
+    with pytest.raises(HTTPException) as exc_info:
+        tenant_update_id("non-existing-id", "new-tenant-id", mock_db_session)
+
+    # Assertions
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Tenant not found"
+    mock_db_session.commit.assert_not_called()
+
+@patch("app.routes.tenants_routes.notify_kafka")
+def test_create_issue(mock_notify_kafka, client_with_access_token, db_session):
+    """Test successful issue creation using the test database."""
+    # Adiciona uma casa fictícia ao banco de dados
+    mock_house = House(
+        id=1,
+        landlord_id=1,
+        name="Test House",
+        address="123 Test St",
+        city="Test City",
+        state="TS",
+        zipcode="12345"
+    )
+    db_session.add(mock_house)
+
+    # Adiciona um inquilino fictício ao banco de dados
+    mock_tenant = Tenents(
+        id=1,
+        tenent_id="test-tenant-id",
+        house_id=mock_house.id,
         rent=1000.00,
         contract="test-contract",
     )
     db_session.add(mock_tenant)
     db_session.commit()
 
-    # Mock Kafka response
-    user_cache = {"cognito_id": MOCK_TENANT_ID}
+    # Mock para o `user_cache` que valida o tenant_id
+    user_cache = {"cognito_id": "test-tenant-id"}
     with patch("app.routes.tenants_routes.user_cache", user_cache):
-        # Input data for issue creation
+        # Dados de entrada para criação de issue
         issue_data = {
-            "house_id": 1,
+            "house_id": mock_house.id,
             "title": "Test Issue",
             "description": "Issue description",
             "status": "open",
             "priority": "high",
         }
 
-        # Call the endpoint
+        # Fazendo a requisição para o endpoint
         response = client_with_access_token.post("/tenants/createIssue", json=issue_data)
+
+        # Verifica se a resposta foi bem-sucedida
         assert response.status_code == 200
         response_data = response.json()
         assert response_data["title"] == "Test Issue"
@@ -147,6 +210,12 @@ def test_create_issue(client_with_access_token, db_session):
         assert response_data["status"] == "open"
         assert response_data["priority"] == "high"
 
+        # Verifica se `notify_kafka` foi chamado com os argumentos esperados
+        # A comparação do `db` ignora a referência exata e considera apenas a chamada.
+        mock_notify_kafka.assert_called_once()
+        args, kwargs = mock_notify_kafka.call_args
+        assert kwargs["tenant_id"] == "test-tenant-id"
+        assert kwargs["issue"] == IssueCreate(**issue_data)
 # Test createIssue unauthorized access
 def test_create_issue_unauthorized(client):
     """Test issue creation without an access token."""
@@ -504,3 +573,140 @@ def test_delete_issue_not_found(mock_query, client_with_access_token):
     response = client_with_access_token.delete(f"/tenants/issues/{MOCK_ISSUE_ID}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Issue not found"
+
+
+@patch("requests.get")  # Correctly patch the global 'requests.get' method
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+def test_download_contract_success(mock_get_tenant_id, mock_requests_get, client_with_access_token, db_session, mock_tenant):
+    """Test successful file download from S3."""
+    # Mock tenant retrieval
+    db_session.add(mock_tenant)
+    db_session.commit()
+
+    # Mock Kafka response
+    mock_get_tenant_id.return_value = MOCK_TENANT_ID
+
+    # Mock S3 file retrieval
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.iter_content = MagicMock(return_value=[MOCK_FILE_CONTENT])
+    mock_requests_get.return_value = mock_response
+
+    # Call the endpoint
+    response = client_with_access_token.get("tenants/downloadContract")
+    assert response.status_code == 200
+    assert response.headers["Content-Disposition"] == f"inline; filename=test-contract.pdf"
+    assert response.content == MOCK_FILE_CONTENT
+
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+def test_download_contract_missing_token(mock_get_tenant_id, client):
+    """Test file download with missing access token."""
+    response = client.get("tenants/downloadContract")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access token missing"
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+def test_download_contract_tenant_not_found(mock_get_tenant_id, client_with_access_token, db_session):
+    """Test file download when tenant is not found."""
+    mock_get_tenant_id.return_value = MOCK_TENANT_ID
+
+    response = client_with_access_token.get("tenants/downloadContract")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Tenant not found"
+
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka")
+@patch("app.routes.tenants_routes.requests.get", side_effect=Exception("S3 connection error"))
+def test_download_contract_unexpected_error(mock_requests_get, mock_get_tenant_id, client_with_access_token, db_session, mock_tenant):
+    """Test unexpected error during file download."""
+    # Mock tenant retrieval
+    db_session.add(mock_tenant)
+    db_session.commit()
+
+    # Mock Kafka response
+    mock_get_tenant_id.return_value = MOCK_TENANT_ID
+
+    response = client_with_access_token.get("tenants/downloadContract")
+    assert response.status_code == 500
+    assert "Unexpected error" in response.json()["detail"]
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka", return_value=MOCK_TENANT_ID)
+def test_get_tenant_id_success(mock_get_kafka, client_with_access_token, db_session):
+    """Test retrieving tenant ID successfully."""
+    mock_tenant = Tenents(
+        id=1,
+        tenent_id=MOCK_TENANT_ID,
+        house_id=1,
+        rent=1000.00,
+        contract="test-contract",
+    )
+    db_session.add(mock_tenant)
+    db_session.commit()
+
+    response = client_with_access_token.get("/tenants/tenantId")
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["id"] == mock_tenant.id
+    assert response_data["tenent_id"] == mock_tenant.tenent_id
+
+def test_get_tenant_id_missing_access_token(client):
+    """Test retrieving tenant ID with missing token."""
+    response = client.get("/tenants/tenantId")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access token missing"
+
+@patch("app.routes.tenants_routes.get_tenant_id_via_kafka", return_value=MOCK_TENANT_ID)
+def test_get_tenant_id_not_found(mock_get_kafka, client_with_access_token, db_session):
+    """Test retrieving tenant ID when tenant is not found."""
+    response = client_with_access_token.get("/tenants/tenantId")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Tenant not found"
+
+@patch("app.routes.tenants_routes.get_tenant_data")
+@patch("app.routes.tenants_routes.producer.send")
+@patch("sqlalchemy.orm.Session.query")
+def test_notify_kafka(mock_query, mock_producer_send, mock_get_tenant_data):
+    """Test the behavior of notify_kafka function."""
+    
+    # Mock responses for get_tenant_data
+    mock_get_tenant_data.side_effect = [
+        [{"tenant_id": "landlord-id", "name": "Landlord Name", "email": "landlord@example.com"}],  # Landlord data
+        [{"tenant_id": "tenant-id", "name": "Tenant Name", "email": "tenant@example.com"}],        # Tenant 1 data
+        [{"tenant_id": "tenant-id-2", "name": "Tenant Two", "email": "tenant2@example.com"}],      # Tenant 2 data
+    ]
+    
+    # Mock the queries for House and Tenents
+    def query_side_effect(model):
+        if model == House:
+            return MagicMock(filter=MagicMock(return_value=MagicMock(first=MagicMock(return_value=House(
+                id=1,
+                landlord_id="landlord-id",
+                name="Test House",
+                address="123 Test St",
+                city="Test City",
+                state="TS",
+                zipcode="12345"
+            )))))
+        elif model == Tenents:
+            return MagicMock(filter=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
+                Tenents(id=1, house_id=1, tenent_id="tenant-id"),
+                Tenents(id=2, house_id=1, tenent_id="tenant-id-2")
+            ]))))
+        else:
+            raise ValueError(f"Unexpected query model: {model}")
+
+    mock_query.side_effect = query_side_effect
+
+    # Mock issue creation
+    issue_data = IssueCreate(
+        house_id=1,
+        title="Test Issue",
+        description="Test Description",
+        status="open",
+        priority="high"
+    )
+
+    # Call the function directly
+    notify_kafka(db=MagicMock(), issue=issue_data, tenant_id="tenant-id")
+

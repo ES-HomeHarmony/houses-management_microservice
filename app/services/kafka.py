@@ -2,6 +2,12 @@ import json
 import os
 import threading
 from kafka import KafkaProducer, KafkaConsumer
+from app.database import SessionLocal
+import logging
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("house_service_kafka")
 
 producer = KafkaProducer(
     bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
@@ -35,9 +41,17 @@ tenant_get_info_consumer = KafkaConsumer(
     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
-print("Kafka consumer initialized and listening...")
-print(f"Subscribed topics: {consumer.subscription()}")
-print(f"KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
+tenant_id_update_consumer = KafkaConsumer(
+    'user-id-update',
+    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
+    auto_offset_reset='earliest',
+    group_id='tenant_id_update_group',
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+)
+
+logger.info("Kafka consumer initialized and listening...")
+logger.info(f"Subscribed topics: {consumer.subscription()}")
+logger.info(f"KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
 
 user_cache = {}
 user_cache2 = {}
@@ -53,7 +67,18 @@ def start_consumer_2():
 def start_consumer_3():
     for message in tenant_get_info_consumer:
         tenant_data_dict.append(message.value)
-
+def start_consumer_4():
+    from app.routes.tenants_routes import tenant_update_id 
+    logger.info("Starting consumer for updating tenant IDs...")
+    for message in tenant_id_update_consumer:
+        logger.info(message.value)
+        with SessionLocal() as db:
+            tenant_update_id(
+                message.value.get("old_id"),
+                message.value.get("new_id"),
+                db
+            )        
 threading.Thread(target=start_consumer, daemon=True).start()
 threading.Thread(target=start_consumer_2, daemon=True).start()
 threading.Thread(target=start_consumer_3, daemon=True).start()
+threading.Thread(target=start_consumer_4, daemon=True).start()
