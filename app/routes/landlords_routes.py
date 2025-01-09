@@ -491,7 +491,7 @@ def notify_paid(db: Session, expense_id: int, tenant_id: int):
             "name": landlord_data[0]["name"],
             "tenant_name": tenants_data[0]["name"],
             "expense_name": db.query(Expense).filter(Expense.id == expense_id).first().title,
-            "amount": db.query(Expense).filter(Expense.id == expense_id).first().amount,
+            "amount": db.query(TenantExpense).filter(Tenents.id == tenant_id, TenantExpense.expense_id == expense_id).first().amount,
             "house_name": house.name
             
         }
