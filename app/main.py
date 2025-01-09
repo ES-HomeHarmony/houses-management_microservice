@@ -5,6 +5,7 @@ from app.database import Base, engine
 
 app = FastAPI()
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
