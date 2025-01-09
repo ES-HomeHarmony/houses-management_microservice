@@ -38,8 +38,6 @@ def get_tenant_id_via_kafka(access_token: str):
     cognito_id_tenant = None
 
     for _ in range(10):
-        
-        logger.info(f"Checking for tenant_id in cache: {user_cache}")
         if "cognito_id" in user_cache.keys():
             cognito_id_tenant = user_cache.get("cognito_id")
             logger.info(f"Tenant ID: {cognito_id_tenant}")
@@ -63,6 +61,7 @@ def tenant_update_id(old_id, new_id, db: Session):
     tenant.tenent_id = new_id
     db.commit()
     db.refresh(tenant)
+    logger.info(f"Tenant ID updated: {tenant}")
     return
 
 @router.post("/createIssue", response_model=IssueResponse)
@@ -94,6 +93,8 @@ def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Req
     db.commit()
     db.refresh(new_issue)
 
+    logger.info(f"New issue created: {new_issue}")
+
     # Adiciona a tarefa em segundo plano
     background_tasks.add_task(
         notify_kafka,
@@ -105,6 +106,7 @@ def create_issue(issue: IssueCreate, db: Session = Depends(get_db), request: Req
     return new_issue
 
 def notify_kafka(db: Session, issue: IssueCreate, tenant_id: str):
+    logger.info(f"Notify Kafka: {issue}")
     landlord_id = db.query(House).filter(House.id == issue.house_id).first().landlord_id
     landlord_data = get_tenant_data([landlord_id])
     tenant_main = get_tenant_data([tenant_id])
@@ -169,6 +171,7 @@ def update_issue(issue: IssueEdit, db: Session = Depends(get_db), request: Reque
 
     db.commit()
     db.refresh(existing_issue)
+    logger.info(f"Issue updated: {existing_issue}")
     return existing_issue
 
 # Endpoint to get houses by tenant
@@ -231,6 +234,7 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db)):
     
     db.delete(issue)
     db.commit()
+    logger.info(f"Issue deleted: {issue}")
     return {"message": "Issue deleted successfully"}
 
 # Get tenant id in the tenents table

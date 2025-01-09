@@ -62,7 +62,6 @@ def get_landlord_id_via_kafka(access_token: str):
     # Wait for validation response
     cognito_id_landlord = None
     for _ in range(10):  # Retry mechanism with limited attempts
-        logger.info(f"Checking for cognito_id in cache: {user_cache}")
         
         if "cognito_id" in user_cache.keys():
             cognito_id_landlord = user_cache.get("cognito_id")
@@ -94,9 +93,7 @@ def create_user_in_user_microservice(user_data: dict):
 
     # Wait for creation response
     cognito_id = None
-    for _ in range(10):  # Retry mechanism with limited attempts
-        logger.info(f"Checking for cognito_id in cache: {user_cache}")
-        
+    for _ in range(10):  # Retry mechanism with limited attempts        
         if "cognito_id" in user_cache2.keys():
             cognito_id = user_cache2.get("cognito_id")
             logger.info(f"Found cognito_id tenant {cognito_id}")
@@ -131,7 +128,6 @@ def get_tenant_data(tenant_ids: list):
     logger.info(f"Waiting for tenant data...{tenant_ids}")
     for _ in range(7): 
         if tenant_data_dict:
-            logger.info(f"tenant_data_dict received: {tenant_data_dict}")
             for tenant_entry in tenant_data_dict:
                 for tenant_id in tenant_entry.keys():
                     if tenant_id in tenant_ids and tenant_id not in processed_tenant_ids:
@@ -253,7 +249,6 @@ async def create_house(house: HouseCreate, db: Session = Depends(get_db), reques
 @router.post("/tenents", response_model=TenentResponse)
 def create_tenent(tenent: TenentCreate, db: Session = Depends(get_db)):
     
-    logger.info("Creating tenant...")
     logger.info(tenent)
 
     # Create a new user in the user microservice
@@ -485,7 +480,6 @@ def notify_paid(db: Session, expense_id: int, tenant_id: int):
     house = db.query(House).filter(House.id == tenant.house_id).first()
     landlord_id = house.landlord_id
     landlord_data = [landlord_id]
-    logger.info(landlord_data)
     landlord_data = get_tenant_data(landlord_data)
     tenant_data = [tenant.tenent_id]
     tenants_data = get_tenant_data(tenant_data)
@@ -703,7 +697,6 @@ def download_expense_file(expense_id: int, db: Session = Depends(get_db)):
             },
         )
     except Exception as e:
-        logger.info(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
         
