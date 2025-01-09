@@ -2,9 +2,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 import os
+import logging
 
 env = os.getenv('ENV', 'development')
 env_file = f'.env/{env}.env'
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("house_service_db")
 
 # Load environment variables from file
 if os.path.exists(env_file):
@@ -19,7 +23,7 @@ db_port = os.getenv('DB_PORT')
 
 DATABASE_URL = f'mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
 
-print(f'URL_DATABASE: {DATABASE_URL}')
+logger.info(f'URL_DATABASE CONNECTED')
 
 
 engine = create_engine(DATABASE_URL)
