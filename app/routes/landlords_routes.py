@@ -18,12 +18,17 @@ from urllib.parse import unquote
 import requests
 import unicodedata
 from app.services.kafka import user_cache, user_cache2, tenant_data_dict, producer, consumer, user_creation_consumer, tenant_get_info_consumer
+import logging
 
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("house_service_landlord")
 
 router = APIRouter(
     prefix="/houses",
     tags=["houses"],
 )
+
 
 
 env = os.getenv('ENV', 'development')
@@ -50,18 +55,18 @@ def get_landlord_id_via_kafka(access_token: str):
     try:
         future = producer.send('user-validation-request', validation_request)
         result = future.get(timeout=10)  # Block until the send is acknowledged or times out
-        print(f"Message sent successfully: {result}")
+        logger.info(f"Message sent successfully: {result}")
     except Exception as e:
-        print(f"Error sending message to Kafka: {e}")
+        logger.info(f"Error sending message to Kafka: {e}")
 
     # Wait for validation response
     cognito_id_landlord = None
     for _ in range(10):  # Retry mechanism with limited attempts
-        print(f"Checking for cognito_id in cache: {user_cache}")
+        logger.info(f"Checking for cognito_id in cache: {user_cache}")
         
         if "cognito_id" in user_cache.keys():
             cognito_id_landlord = user_cache.get("cognito_id")
-            print(f"Found cognito_id for landlord_id {cognito_id_landlord}")
+            logger.info(f"Found cognito_id for landlord_id {cognito_id_landlord}")
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
     
@@ -82,19 +87,19 @@ def create_user_in_user_microservice(user_data: dict):
     try:
         future = producer.send('user-creation-request', user_creation_request)
         result = future.get(timeout=10)  # Block until the send is acknowledged or times out
-        print(f"Message sent successfully: {result}")
+        logger.info(f"Message sent successfully: {result}")
         producer.send('invite-request', user_creation_request)
     except Exception as e:
-        print(f"Error sending message to Kafka: {e}")
+        logger.info(f"Error sending message to Kafka: {e}")
 
     # Wait for creation response
     cognito_id = None
     for _ in range(10):  # Retry mechanism with limited attempts
-        print(f"Checking for cognito_id in cache: {user_cache}")
+        logger.info(f"Checking for cognito_id in cache: {user_cache}")
         
         if "cognito_id" in user_cache2.keys():
             cognito_id = user_cache2.get("cognito_id")
-            print(f"Found cognito_id tenant {cognito_id}")
+            logger.info(f"Found cognito_id tenant {cognito_id}")
             break
         time.sleep(1)  # Add a sleep to avoid busy-waiting
 
@@ -115,18 +120,18 @@ def get_tenant_data(tenant_ids: list):
     try:
         future = producer.send('tenant_info_request', validation_request)
         result = future.get(timeout=10)  # Block until the send is acknowledged or times out
-        print(f"Message sent successfully: {result}")
+        logger.info(f"Message sent successfully: {result}")
     except Exception as e:
-        print(f"Error sending message to Kafka: {e}")
+        logger.info(f"Error sending message to Kafka: {e}")
 
     # Wait for the response
     tenant_data = []
     processed_tenant_ids = set()
 
-    print(f"Waiting for tenant data...{tenant_ids}")
+    logger.info(f"Waiting for tenant data...{tenant_ids}")
     for _ in range(7): 
         if tenant_data_dict:
-            print(f"tenant_data_dict received: {tenant_data_dict}")
+            logger.info(f"tenant_data_dict received: {tenant_data_dict}")
             for tenant_entry in tenant_data_dict:
                 for tenant_id in tenant_entry.keys():
                     if tenant_id in tenant_ids and tenant_id not in processed_tenant_ids:
@@ -137,7 +142,7 @@ def get_tenant_data(tenant_ids: list):
                         tenant_data.append({"tenant_id": tenant_id, "name": tenant_name, "email": tenant_email})
                         
                         processed_tenant_ids.add(tenant_id)  # Mark as processed
-                        print(f"Found tenant data: {tenant_id}: {tenant_name} - {tenant_email}")
+                        logger.info(f"Found tenant data: {tenant_id}: {tenant_name} - {tenant_email}")
 
         time.sleep(1)  # Add a sleep to avoid busy-waiting
     
@@ -248,8 +253,8 @@ async def create_house(house: HouseCreate, db: Session = Depends(get_db), reques
 @router.post("/tenents", response_model=TenentResponse)
 def create_tenent(tenent: TenentCreate, db: Session = Depends(get_db)):
     
-    print("Creating tenant...")
-    print(tenent)
+    logger.info("Creating tenant...")
+    logger.info(tenent)
 
     # Create a new user in the user microservice
     user_data = {
@@ -328,7 +333,7 @@ def get_house_with_tenents(house_id: int, db: Session = Depends(get_db), request
             })
 
     # Print structured tenant data for debugging
-    print("Structured tenants data:", structured_tenants)
+    logger.info("Structured tenants data:", structured_tenants)
 
     return {
         "house": house,
@@ -410,7 +415,7 @@ def add_expense(expense_data: str = Form(...), file: UploadFile = File(...),db: 
         }
     }
 
-    print(message)
+    logger.info(message)
     producer.send('invite-request', message)
 
         
@@ -475,12 +480,12 @@ def mark_tenant_payment(tenant_id: int, expense_id: int, db: Session = Depends(g
     return {"message": "Tenant payment updated successfully"}
 
 def notify_paid(db: Session, expense_id: int, tenant_id: int):
-    print("Notifying landlord that tenant paid...")
+    logger.info("Notifying landlord that tenant paid...")
     tenant = db.query(Tenents).filter(Tenents.id == tenant_id).first()
     house = db.query(House).filter(House.id == tenant.house_id).first()
     landlord_id = house.landlord_id
     landlord_data = [landlord_id]
-    print(landlord_data)
+    logger.info(landlord_data)
     landlord_data = get_tenant_data(landlord_data)
     tenant_data = [tenant.tenent_id]
     tenants_data = get_tenant_data(tenant_data)
@@ -544,7 +549,7 @@ def get_expense_by_id(expense_id: int, db: Session = Depends(get_db)):
     print("Cognito IDs:", cognito_ids)
 
     for tenant in tenant_records:
-        print(tenant.__dict__)
+        logger.info(tenant.__dict__)
     # Fetch tenant data (name and email) using the Cognito IDs
     tenant_data = get_tenant_data(cognito_ids)
 
@@ -631,7 +636,7 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
                 f"contracts/{file.filename}"
             )
 
-            print(f"File uploaded successfully: {file.filename}")
+            logger.info(f"File uploaded successfully: {file.filename}")
 
             file_url = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/contracts/{file.filename}"
         
@@ -658,7 +663,7 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
         "name": tenants_data[0]["name"]
         }
     }
-    print(message)
+    logger.info(message)
     producer.send('invite-request', message)
 
     return {"message": "Contract uploaded successfully", "file_url": file_url}
@@ -676,7 +681,7 @@ def download_expense_file(expense_id: int, db: Session = Depends(get_db)):
 
     # Decodificar a URL com caracteres especiais
     file_url = unquote(expense.file_path)
-    print(f"Downloading file from URL: {file_url}")
+    logger.info(f"Downloading file from URL: {file_url}")
 
     try:
         # Fazer a requisição HTTP ao S3 para buscar o arquivo
@@ -698,7 +703,7 @@ def download_expense_file(expense_id: int, db: Session = Depends(get_db)):
             },
         )
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.info(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
         

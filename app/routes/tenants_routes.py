@@ -7,11 +7,17 @@ from app.schemas import HouseResponse, IssueCreate, IssueResponse, IssueEdit, Te
 from typing import List
 import time
 from app.routes.landlords_routes import get_tenant_data
+import logging
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("house_service_tenant")
 
 router = APIRouter(
     prefix="/tenants",
     tags=["tenants"],
 )
+
 
 DETAIL = "Tenant not found"
 
@@ -25,18 +31,18 @@ def get_tenant_id_via_kafka(access_token: str):
     try:
         future = producer.send('user-validation-request', value=validation_request)
         result = future.get(timeout=10)
-        print(f"Message sent successfully: {result}")
+        logger.info(f"Message sent successfully: {result}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.info(f"An error occurred: {e}")
 
     cognito_id_tenant = None
 
     for _ in range(10):
         
-        print(f"Checking for tenant_id in cache: {user_cache}")
+        logger.info(f"Checking for tenant_id in cache: {user_cache}")
         if "cognito_id" in user_cache.keys():
             cognito_id_tenant = user_cache.get("cognito_id")
-            print(f"Tenant ID: {cognito_id_tenant}")
+            logger.info(f"Tenant ID: {cognito_id_tenant}")
             break
         
         time.sleep(1)
@@ -137,7 +143,7 @@ def notify_kafka(db: Session, issue: IssueCreate, tenant_id: str):
     }
 
     # Aqui você enviaria a mensagem ao Kafka
-    print(f"Message to be sent: {message}")
+    logger.info(f"Message to be sent: {message}")
     producer.send("invite-request", message)
 
 @router.put("/updateIssue", response_model=IssueResponse)
