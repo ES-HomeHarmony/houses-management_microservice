@@ -630,7 +630,7 @@ def upload_contract(contract_data: str = Form(...), file: UploadFile = File(...)
                 f"contracts/{file.filename}"
             )
 
-            logger.info(f"File uploaded successfully: {file.filename}")
+            logger.info(f"File uploaded successfully")
 
             file_url = f"https://{os.getenv('S3_BUCKET')}.s3.{os.getenv('S3_REGION')}.amazonaws.com/contracts/{file.filename}"
         
